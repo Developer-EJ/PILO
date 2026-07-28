@@ -3877,7 +3877,7 @@ def _meeting_report_prompt_without_report_titles(
         else report_titles
     )
     for report_title in titles:
-        normalized_prompt = normalized_prompt.replace(report_title, " ", 1)
+        normalized_prompt = normalized_prompt.replace(report_title, " ")
     return re.sub(r"\s+", " ", normalized_prompt).strip()
 
 
@@ -4190,7 +4190,7 @@ def _normalize_meeting_report_search_routing(
         MEETING_EVIDENCE_SEARCH_CAPABILITY_ID,
         MEETING_REPORT_UNIFIED_SEARCH_CAPABILITY_ID,
     }
-    explicit_titles = _explicit_meeting_report_titles(prompt)
+    explicit_titles = _current_turn_meeting_report_titles(prompt, None)
     meeting_report_scope_capability_ids = {
         *meeting_search_capability_ids,
         "meeting.report.detail",
@@ -4336,7 +4336,11 @@ def _current_turn_meeting_report_titles(
     if len(marked_titles) == 1:
         return marked_titles
 
-    natural_titles = _natural_meeting_report_titles(prompt)
+    natural_titles = tuple(
+        title
+        for title in _natural_meeting_report_titles(prompt)
+        if not _meeting_report_title_conflicts_with_prompt(title, prompt)
+    )
     if len(natural_titles) > 1:
         return natural_titles
 
@@ -4379,10 +4383,17 @@ def _meeting_report_title_conflicts_with_prompt(
     prompt: str,
 ) -> bool:
     candidate_pattern = r"\s+".join(re.escape(part) for part in re.split(r"\s+", candidate) if part)
+    title_scope_suffix = (
+        r"[\"'‘’“”]*\s*"
+        r"(?:(?:이라는|라는|이란|란|인)\s*)?"
+        r"(?:(?:회의록|회의|미팅)(?:\s*제목)?|제목)?\s*"
+        r"(?:은|는|이|가|을|를)?\s*"
+    )
+    negation_pattern = r"(?:말고|아니라|제외|취소|사용하지)"
+    negated_title_pattern = rf"{candidate_pattern}{title_scope_suffix}{negation_pattern}"
     return bool(
         re.search(
-            rf"{candidate_pattern}[\"'‘’“”]*\s*(?:은|는|이|가|을|를)?\s*"
-            r"(?:말고|아니라|제외|취소|사용하지)",
+            negated_title_pattern,
             prompt,
             re.IGNORECASE,
         )

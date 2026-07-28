@@ -2745,6 +2745,35 @@ def test_multiple_explicit_report_titles_require_clarification(
     assert "제목 하나" in (corrected.clarification_question or "")
 
 
+def test_cancelled_explicit_report_title_does_not_require_router_clarification() -> None:
+    tools = [
+        tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
+        tool_snapshot(name="search_meeting_transcript", inputSchema={"type": "object"}),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=meeting_search_catalog(tools))
+    )
+    assert job.tool_capability_catalog is not None
+
+    corrected = _normalize_meeting_report_search_routing(
+        AgentRoutingDecision(
+            status="routed",
+            domains=("meeting",),
+            capability_ids=("meeting.report.hybrid_search",),
+            intent_summary="회의록 제목과 내용 검색",
+            confidence="high",
+            clarification_question=None,
+            unsupported_reason=None,
+        ),
+        job.tool_capability_catalog,
+        prompt='제목이 "온보딩 회의"인 회의록 말고 제목이 "배포 회의"인 회의록 찾아줘',
+    )
+
+    assert corrected.status == "routed"
+    assert corrected.capability_ids == ("meeting.report.hybrid_search",)
+    assert corrected.intent_summary.startswith("명시한 회의록 제목")
+
+
 @pytest.mark.parametrize(
     ("prompt", "expected"),
     [
@@ -5884,6 +5913,33 @@ def test_current_turn_scope_keeps_valid_planner_title_with_weekday_words(
         "fallback": "none",
         "reportTitle": report_title,
     }
+
+
+def test_current_turn_scope_masks_every_repeated_title_before_date_parsing() -> None:
+    report_title = "토요일 데일리스크럼"
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": "결정 이유와 발언",
+                "fallback": "none",
+                "reportTitle": report_title,
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt='"토요일 데일리스크럼"에서 결정 이유를 찾고 '
+        '"토요일 데일리스크럼"의 발언도 요약해줘',
+        current_date="2026-07-29",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    normalized_input = normalized.output_summary["input"]
+    assert normalized_input["fallback"] == "none"
+    assert normalized_input["reportTitle"] == report_title
+    assert "from" not in normalized_input
+    assert "to" not in normalized_input
 
 
 @pytest.mark.parametrize(
