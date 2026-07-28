@@ -8127,7 +8127,7 @@ assert.match(
 );
 assert.match(
   panel,
-  /isDialectSelectDisabled=\{\s*!isSessionReady \|\|\s*isWriteProtocolMismatch\s*\}/s
+  /isDialectSelectDisabled=\{\s*!isSessionReady \|\|\s*isWriteProtocolMismatch \|\|\s*sourceMutationIntent\.pendingMutation !== null\s*\}/s
 );
 assert.match(
   panel,
@@ -8185,11 +8185,11 @@ assert.match(
 );
 assert.match(
   panel,
-  /canRedoNormalizedSql=\{[\s\S]*?modelSqlHistory\.future\.length > 0/s
+  /canRedoNormalizedSql=\{[\s\S]*?sourceMutationIntent\.pendingMutation === null[\s\S]*?modelSqlHistory\.future\.length > 0/s
 );
 assert.match(
   panel,
-  /canUndoNormalizedSql=\{[\s\S]*?modelSqlHistory\.past\.length > 0/s
+  /canUndoNormalizedSql=\{[\s\S]*?sourceMutationIntent\.pendingMutation === null[\s\S]*?modelSqlHistory\.past\.length > 0/s
 );
 assert.match(
   panel,

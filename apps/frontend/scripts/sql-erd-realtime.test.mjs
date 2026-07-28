@@ -627,6 +627,22 @@ assert.equal(
       true,
       "moving focus from the editor to a mutation control keeps lock intent"
     );
+    const pendingFromEngagedControl =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        engagedControlIntent,
+        { action: { type: "undo" }, type: "request" }
+      );
+    assert.equal(
+      pendingFromEngagedControl.controlEngaged,
+      false,
+      "the pending mutation owns lock intent after its control is disabled"
+    );
+    assert.equal(
+      sourceMutationIntent.shouldHoldSqlErdSourceMutationIntent(
+        pendingFromEngagedControl
+      ),
+      true
+    );
     const pendingDialectIntent = sourceMutationIntent.reduceSqlErdSourceMutationIntent(
       sourceMutationIntent.createSqlErdSourceMutationIntentState(),
       {
@@ -708,6 +724,24 @@ assert.equal(
         `${action.type} is consumed exactly once`
       );
     }
+    const pendingUndoIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        sourceMutationIntent.createSqlErdSourceMutationIntentState(),
+        { action: { type: "undo" }, type: "request" }
+      );
+    const duplicateRequestIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        pendingUndoIntent,
+        { action: { type: "redo" }, type: "request" }
+      );
+    assert.deepEqual(
+      sourceMutationIntent.getRunnableSqlErdSourceMutation(
+        duplicateRequestIntent,
+        true
+      ),
+      { type: "undo" },
+      "a second mutation request cannot replace the action waiting for the lock"
+    );
     assert.equal(
       sourceLock.shouldHoldSqlErdSourceLock({
         enabled: true,

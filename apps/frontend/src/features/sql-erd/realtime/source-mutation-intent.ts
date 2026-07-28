@@ -39,8 +39,12 @@ export function reduceSqlErdSourceMutationIntent(
         controlEngaged: action.engaged
       };
     case "request":
+      if (state.pendingMutation) {
+        return state;
+      }
+
       return {
-        ...state,
+        controlEngaged: false,
         pendingMutation: action.action
       };
     case "reset":

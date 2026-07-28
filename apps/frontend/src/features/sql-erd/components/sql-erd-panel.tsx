@@ -2715,6 +2715,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           isSessionReady &&
           !isWriteProtocolMismatch &&
           !isNormalizedSqlApplying &&
+          sourceMutationIntent.pendingMutation === null &&
           !isSqlErdDraftDirty(sqlErdEditState) &&
           (lastResolvedDialect !== null ||
             sqlErdEditState.draftDialect !== "auto")
@@ -2722,11 +2723,13 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         canRedoNormalizedSql={
           !isWriteProtocolMismatch &&
           !isNormalizedSqlApplying &&
+          sourceMutationIntent.pendingMutation === null &&
           modelSqlHistory.future.length > 0
         }
         canUndoNormalizedSql={
           !isWriteProtocolMismatch &&
           !isNormalizedSqlApplying &&
+          sourceMutationIntent.pendingMutation === null &&
           modelSqlHistory.past.length > 0
         }
         counts={sessionCounts}
@@ -2734,7 +2737,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         isOpen={isSourceOpen}
         isDialectSelectDisabled={
           !isSessionReady ||
-          isWriteProtocolMismatch
+          isWriteProtocolMismatch ||
+          sourceMutationIntent.pendingMutation !== null
         }
         onDialectChange={handleDialectChange}
         onPreviewNormalizedSql={handlePreviewNormalizedSql}
