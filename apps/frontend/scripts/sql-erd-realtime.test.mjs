@@ -29,6 +29,15 @@ async function loadOperationSyncRuntime() {
     outputDir,
     "source-lock-controller.mjs"
   );
+  const sourceMutationIntentOutputPath = join(
+    outputDir,
+    "source-mutation-intent.mjs"
+  );
+  const sessionStateOutputPath = join(outputDir, "session-state.mjs");
+  const sourceAutosaveErrorOutputPath = join(
+    outputDir,
+    "source-autosave-error.mjs"
+  );
   try {
     await compileRuntimeModule(
       "../src/features/sql-erd/realtime/operation-sync-state.ts",
@@ -43,11 +52,29 @@ async function loadOperationSyncRuntime() {
       sourceLockControllerOutputPath,
       [[/from "\.\/source-lock-state"/g, 'from "./source-lock-state.mjs"']]
     );
+    await compileRuntimeModule(
+      "../src/features/sql-erd/realtime/source-mutation-intent.ts",
+      sourceMutationIntentOutputPath
+    );
+    await compileRuntimeModule(
+      "../src/features/sql-erd/utils/session-state.ts",
+      sessionStateOutputPath
+    );
+    await compileRuntimeModule(
+      "../src/features/sql-erd/utils/source-autosave-error.ts",
+      sourceAutosaveErrorOutputPath,
+      [[
+        /from "@\/features\/sql-erd\/utils\/session-state"/g,
+        'from "./session-state.mjs"'
+      ]]
+    );
 
     return {
       operationSync: await import(`${new URL(`file:///${outputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
+      sourceAutosaveError: await import(`${new URL(`file:///${sourceAutosaveErrorOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
       sourceLock: await import(`${new URL(`file:///${sourceLockOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
       sourceLockController: await import(`${new URL(`file:///${sourceLockControllerOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
+      sourceMutationIntent: await import(`${new URL(`file:///${sourceMutationIntentOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
       outputDir
     };
   } catch (error) {
@@ -526,8 +553,10 @@ assert.equal(
   const {
     operationSync,
     outputDir,
+    sourceAutosaveError,
     sourceLock,
-    sourceLockController
+    sourceLockController,
+    sourceMutationIntent
   } = await loadOperationSyncRuntime();
   const operations = Array.from({ length: 101 }, (_, index) => ({
     id: `operation-${index + 1}`,
@@ -586,6 +615,224 @@ assert.equal(
 
     assert.equal(sourceLock.getSourceLockIntervalRequest("held"), "renew");
     assert.equal(sourceLock.getSourceLockIntervalRequest("read_only"), "acquire");
+    const engagedControlIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        sourceMutationIntent.createSqlErdSourceMutationIntentState(),
+        { engaged: true, type: "control_engagement_changed" }
+      );
+    assert.equal(
+      sourceMutationIntent.shouldHoldSqlErdSourceMutationIntent(
+        engagedControlIntent
+      ),
+      true,
+      "moving focus from the editor to a mutation control keeps lock intent"
+    );
+    const pendingFromEngagedControl =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        engagedControlIntent,
+        { action: { type: "undo" }, type: "request" }
+      );
+    assert.equal(
+      pendingFromEngagedControl.controlEngaged,
+      false,
+      "the pending mutation owns lock intent after its control is disabled"
+    );
+    assert.equal(
+      sourceMutationIntent.shouldHoldSqlErdSourceMutationIntent(
+        pendingFromEngagedControl
+      ),
+      true
+    );
+    const pendingDialectIntent = sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+      sourceMutationIntent.createSqlErdSourceMutationIntentState(),
+      {
+        action: { dialect: "mysql", type: "dialect" },
+        type: "request"
+      }
+    );
+    assert.equal(
+      sourceMutationIntent.shouldHoldSqlErdSourceMutationIntent(
+        pendingDialectIntent
+      ),
+      true,
+      "a queued dialect change keeps the lock intent active"
+    );
+    assert.equal(
+      sourceMutationIntent.getRunnableSqlErdSourceMutation(
+        pendingDialectIntent,
+        false
+      ),
+      null,
+      "a queued mutation does not run before the source lock is held"
+    );
+    const blurredPendingDialectIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        pendingDialectIntent,
+        { engaged: false, type: "control_engagement_changed" }
+      );
+    assert.equal(
+      sourceMutationIntent.shouldHoldSqlErdSourceMutationIntent(
+        blurredPendingDialectIntent
+      ),
+      true,
+      "control blur must not discard a mutation waiting for the source lock"
+    );
+    assert.deepEqual(
+      sourceMutationIntent.getRunnableSqlErdSourceMutation(
+        blurredPendingDialectIntent,
+        true
+      ),
+      { dialect: "mysql", type: "dialect" },
+      "the pending mutation becomes runnable after the source lock is held"
+    );
+    const consumedDialectIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        blurredPendingDialectIntent,
+        { type: "consume" }
+      );
+    assert.equal(
+      sourceMutationIntent.getRunnableSqlErdSourceMutation(
+        consumedDialectIntent,
+        true
+      ),
+      null,
+      "the queued mutation is consumed exactly once"
+    );
+    for (const action of [{ type: "undo" }, { type: "redo" }]) {
+      const pendingIntent =
+        sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+          sourceMutationIntent.createSqlErdSourceMutationIntentState(),
+          { action, type: "request" }
+        );
+      assert.deepEqual(
+        sourceMutationIntent.getRunnableSqlErdSourceMutation(
+          pendingIntent,
+          true
+        ),
+        action,
+        `${action.type} becomes runnable after the source lock is held`
+      );
+      assert.equal(
+        sourceMutationIntent.getRunnableSqlErdSourceMutation(
+          sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+            pendingIntent,
+            { type: "consume" }
+          ),
+          true
+        ),
+        null,
+        `${action.type} is consumed exactly once`
+      );
+    }
+    const pendingUndoIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        sourceMutationIntent.createSqlErdSourceMutationIntentState(),
+        { action: { type: "undo" }, type: "request" }
+      );
+    const duplicateRequestIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        pendingUndoIntent,
+        { action: { type: "redo" }, type: "request" }
+      );
+    assert.deepEqual(
+      sourceMutationIntent.getRunnableSqlErdSourceMutation(
+        duplicateRequestIntent,
+        true
+      ),
+      { type: "undo" },
+      "a second mutation request cannot replace the action waiting for the lock"
+    );
+    const reengagedPendingIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        pendingUndoIntent,
+        { engaged: true, type: "control_engagement_changed" }
+      );
+    const consumedReengagedIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        reengagedPendingIntent,
+        { type: "consume" }
+      );
+    assert.equal(
+      sourceMutationIntent.shouldHoldSqlErdSourceMutationIntent(
+        consumedReengagedIntent
+      ),
+      false,
+      "a disabled pending control cannot leave engagement holding the lock after consume"
+    );
+    assert.equal(
+      sourceLock.shouldHoldSqlErdSourceLock({
+        enabled: true,
+        hasDirtyDraft: false,
+        hasPendingSave: false,
+        isEditorEngaged: false,
+        isMutationApplying: false,
+        isMutationPreviewOpen: false
+      }),
+      false,
+      "Source 패널을 보기만 하는 상태는 lock을 유지하지 않는다"
+    );
+    for (const activeIntent of [
+      "hasDirtyDraft",
+      "hasPendingSave",
+      "isEditorEngaged",
+      "isMutationApplying",
+      "isMutationPreviewOpen"
+    ]) {
+      assert.equal(
+        sourceLock.shouldHoldSqlErdSourceLock({
+          enabled: true,
+          hasDirtyDraft: false,
+          hasPendingSave: false,
+          isEditorEngaged: false,
+          isMutationApplying: false,
+          isMutationPreviewOpen: false,
+          [activeIntent]: true
+        }),
+        true,
+        `${activeIntent} 상태는 source lock을 유지한다`
+      );
+    }
+    assert.equal(
+      sourceLock.shouldHoldSqlErdSourceLock({
+        enabled: false,
+        hasDirtyDraft: true,
+        hasPendingSave: true,
+        isEditorEngaged: true,
+        isMutationApplying: true,
+        isMutationPreviewOpen: true
+      }),
+      false,
+      "operations_v1이 아니면 편집 의도가 있어도 source lock을 사용하지 않는다"
+    );
+    assert.deepEqual(
+      sourceAutosaveError.classifySqlErdSourceAutosaveError({
+        path: "/workspaces/workspace-1/sql-erd/sessions/session-1/source-snapshots",
+        status: 409
+      }),
+      { kind: "source_conflict" }
+    );
+    assert.deepEqual(
+      sourceAutosaveError.classifySqlErdSourceAutosaveError({
+        path: "/workspaces/workspace-1/sql-erd/sessions/session-1/operations",
+        status: 409
+      }),
+      { kind: "layout_block", reason: "conflict" }
+    );
+    assert.deepEqual(
+      sourceAutosaveError.classifySqlErdSourceAutosaveError({
+        code: "SQL_ERD_WRITE_PROTOCOL_MISMATCH",
+        path: "/workspaces/workspace-1/sql-erd/sessions/session-1/source-snapshots",
+        status: 409
+      }),
+      { kind: "layout_block", reason: "write_protocol_mismatch" }
+    );
+    assert.deepEqual(
+      sourceAutosaveError.classifySqlErdSourceAutosaveError({
+        path: "/workspaces/workspace-1/sql-erd/sessions/session-1/source-snapshots",
+        status: 503
+      }),
+      { kind: "retry" }
+    );
 
     const heldLeases = new Map();
     const requests = [];
@@ -653,6 +900,70 @@ assert.equal(
       "acquire:second:second-lease-4",
       "release:second:second-lease-4"
     ]);
+
+    const transitionRequests = [];
+    let finishRelease;
+    let transitionLeaseNumber = 0;
+    const transitionController =
+      sourceLockController.createSqlErdSourceLockController({
+        client: {
+          acquireSourceLock: async (leaseId) => {
+            transitionRequests.push(`acquire:${leaseId}`);
+            return { leaseId };
+          },
+          releaseSourceLock: async (leaseId) => {
+            transitionRequests.push(`release:start:${leaseId}`);
+            await new Promise((resolve) => {
+              finishRelease = resolve;
+            });
+            transitionRequests.push(`release:end:${leaseId}`);
+          },
+          renewSourceLock: async (leaseId) => ({ leaseId })
+        },
+        createLeaseId: () => `transition-lease-${++transitionLeaseNumber}`
+      });
+
+    await transitionController.start();
+    const stopTransition = transitionController.stop();
+    const restartTransition = transitionController.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.deepEqual(transitionRequests, [
+      "acquire:transition-lease-1",
+      "release:start:transition-lease-1"
+    ]);
+    finishRelease();
+    await Promise.all([stopTransition, restartTransition]);
+    assert.deepEqual(transitionRequests, [
+      "acquire:transition-lease-1",
+      "release:start:transition-lease-1",
+      "release:end:transition-lease-1",
+      "acquire:transition-lease-2"
+    ]);
+
+    finishRelease = undefined;
+    const recoverTransition = transitionController.recover();
+    assert.equal(
+      transitionController.getState().status,
+      "acquiring",
+      "recover가 시작되면 stale lease로 publish할 수 없게 즉시 held 상태를 닫는다"
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.deepEqual(transitionRequests.slice(-1), [
+      "release:start:transition-lease-2"
+    ]);
+    finishRelease();
+    await recoverTransition;
+    assert.deepEqual(transitionRequests.slice(-3), [
+      "release:start:transition-lease-2",
+      "release:end:transition-lease-2",
+      "acquire:transition-lease-3"
+    ]);
+    const finalStop = transitionController.stop();
+    await Promise.resolve();
+    finishRelease();
+    await finalStop;
   } finally {
     await rm(outputDir, { force: true, recursive: true });
   }

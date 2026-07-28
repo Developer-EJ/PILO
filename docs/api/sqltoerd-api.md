@@ -1430,6 +1430,14 @@ publish require the same unexpired owner/lease pair. Release is idempotent only
 for a missing matching lease; any active mismatch returns generic `409 CONFLICT`
 without revealing the holder.
 
+The frontend acquires this lease from explicit source-edit intent, not from the
+Source panel's open state. Opening the panel or navigating to an FK source range
+is read-only inspection and does not acquire a lease. When editor focus leaves
+for the canvas, a clean source releases the lease; a dirty draft, active parse or
+pending source publish keeps it until the source publish completes. A
+`source-snapshots` lease conflict is recovered within the source write path and
+does not pause independent `layout_patch` operation persistence.
+
 ```ts
 type SqltoerdSourceLock = {
   leaseId: string;
