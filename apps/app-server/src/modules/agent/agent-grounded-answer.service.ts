@@ -5,6 +5,7 @@ import { DocumentSearchService } from "../drive/document-search.service";
 import { MeetingTranscriptRagService } from "../meeting-report/meeting-transcript-rag.service";
 import type { AgentExecutionLease } from "./agent-logging.service";
 import type {
+  AgentGroundingRetrievalContext,
   AgentGroundingSourceCandidate,
   AgentJsonObject,
   AgentResourceRef
@@ -24,6 +25,8 @@ interface GroundingCitationRegistryEntry {
   citationId: string;
   sourceType: GroundingSourceType;
   sourceRef: string;
+  reportTitle?: string;
+  meetingStartedAt?: string;
   resourceRef: AgentResourceRef;
 }
 
@@ -31,14 +34,13 @@ export interface GroundingContextSource {
   citationId: string;
   sourceType: GroundingSourceType;
   title?: string;
+  reportTitle?: string;
+  meetingStartedAt?: string;
   excerpt: string;
   resourceRef: AgentResourceRef;
 }
 
-export interface GroundingRetrievalContext {
-  requestedReportTitle: string;
-  exactTitleMatchFound: false;
-}
+export type GroundingRetrievalContext = AgentGroundingRetrievalContext;
 
 export interface MeetingReportHybridContext extends AgentJsonObject {
   requestedReportTitle: string;
@@ -61,6 +63,7 @@ export class AgentGroundedAnswerService {
     outputSummary: AgentJsonObject;
     resourceRefs: AgentResourceRef[];
     groundingSources?: AgentGroundingSourceCandidate[];
+    groundingRetrievalContext?: GroundingRetrievalContext;
     meetingReportHybridContext?: MeetingReportHybridContext;
     executionLease: AgentExecutionLease;
   }): Promise<void> {
@@ -71,18 +74,26 @@ export class AgentGroundedAnswerService {
       citationId: `citation_${randomUUID()}`,
       sourceType: source.sourceType,
       sourceRef: source.sourceRef,
+      ...(source.reportTitle ? { reportTitle: source.reportTitle } : {}),
+      ...(source.meetingStartedAt
+        ? { meetingStartedAt: source.meetingStartedAt }
+        : {}),
       resourceRef: this.boundResourceRef(source.resourceRef)
     }));
     const resourceRefs = this.mergeResourceRefs(
       input.resourceRefs,
       registry.map((entry) => entry.resourceRef)
     );
-    const retrievalContext = input.meetingReportHybridContext?.exactMatchCount === 0
-      ? {
-          requestedReportTitle: input.meetingReportHybridContext.requestedReportTitle,
-          exactTitleMatchFound: false as const
-        }
-      : undefined;
+    const retrievalContext =
+      input.groundingRetrievalContext ??
+      (input.meetingReportHybridContext?.exactMatchCount === 0
+        ? {
+            requestedReportTitle:
+              input.meetingReportHybridContext.requestedReportTitle,
+            exactTitleMatchFound: false as const,
+            workspaceFallbackApplied: true
+          }
+        : undefined);
     const outputSummary: AgentJsonObject = {
       ...input.outputSummary,
       groundingOutcome:
@@ -310,13 +321,29 @@ export class AgentGroundedAnswerService {
       const citationId = typeof item.citationId === "string" ? item.citationId : "";
       const sourceRef = typeof item.sourceRef === "string" ? item.sourceRef : "";
       const sourceType = item.sourceType;
+      const reportTitle =
+        typeof item.reportTitle === "string"
+          ? item.reportTitle.trim().slice(0, 500)
+          : "";
+      const meetingStartedAt =
+        typeof item.meetingStartedAt === "string" &&
+        Number.isFinite(Date.parse(item.meetingStartedAt))
+          ? new Date(item.meetingStartedAt).toISOString()
+          : "";
       if (
         !/^citation_[0-9a-f-]{36}$/i.test(citationId) ||
         !sourceRef ||
         !this.isSourceType(sourceType) ||
         !this.isResourceRef(item.resourceRef)
       ) return [];
-      return [{ citationId, sourceType, sourceRef, resourceRef: item.resourceRef }];
+      return [{
+        citationId,
+        sourceType,
+        sourceRef,
+        ...(reportTitle ? { reportTitle } : {}),
+        ...(meetingStartedAt ? { meetingStartedAt } : {}),
+        resourceRef: item.resourceRef
+      }];
     });
   }
 
@@ -361,6 +388,10 @@ export class AgentGroundedAnswerService {
       result.push({
         citationId: entry.citationId,
         sourceType: entry.sourceType,
+        ...(entry.reportTitle ? { reportTitle: entry.reportTitle } : {}),
+        ...(entry.meetingStartedAt
+          ? { meetingStartedAt: entry.meetingStartedAt }
+          : {}),
         excerpt: source.content,
         resourceRef: entry.resourceRef.resourceId
           ? entry.resourceRef
@@ -472,6 +503,13 @@ export class AgentGroundedAnswerService {
     retrievalContext: GroundingRetrievalContext | undefined
   ): string {
     if (!retrievalContext) return NO_RELEVANT_SOURCES_MESSAGE;
+    if (!retrievalContext.workspaceFallbackApplied) {
+      return (
+        `제목이 ‘${retrievalContext.requestedReportTitle}’인 회의록을 ` +
+        "정확 제목이나 유사 제목 후보에서 찾지 못했습니다. " +
+        "Workspace 전체 근거 검색은 요청되지 않아 범위를 자동으로 넓히지 않았습니다."
+      );
+    }
     return (
       `제목이 정확히 ‘${retrievalContext.requestedReportTitle}’인 회의록은 없었습니다. ` +
       "전체 회의 내용에서도 질문과 관련된 근거를 찾지 못했습니다. " +
@@ -480,14 +518,22 @@ export class AgentGroundedAnswerService {
   }
 
   private readRetrievalContext(value: unknown): GroundingRetrievalContext | undefined {
-    if (!this.isPlainObject(value) || value.exactTitleMatchFound !== false) {
+    if (
+      !this.isPlainObject(value) ||
+      value.exactTitleMatchFound !== false ||
+      typeof value.workspaceFallbackApplied !== "boolean"
+    ) {
       return undefined;
     }
     const title = value.requestedReportTitle;
     if (typeof title !== "string") return undefined;
     const normalized = title.trim().slice(0, 500);
     return normalized
-      ? { requestedReportTitle: normalized, exactTitleMatchFound: false }
+      ? {
+          requestedReportTitle: normalized,
+          exactTitleMatchFound: false,
+          workspaceFallbackApplied: value.workspaceFallbackApplied
+        }
       : undefined;
   }
 

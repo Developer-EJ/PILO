@@ -453,7 +453,7 @@
     },
     {
       "name": "search_meeting_reports",
-      "description": "MeetingReport 검색의 단일 진입점입니다. 회의 시작 시각 범위 안에서 표시 제목 exact, pg_trgm 유사 제목, transcript·Activity 하이브리드 근거 검색을 순서대로 수행합니다. 제목 후보가 여러 개이거나 단일 유사 후보의 신뢰도가 부족하면 근거 검색 전에 사용자 선택을 요청합니다.",
+      "description": "MeetingReport 내용·근거를 evidence intent로 검색합니다. 현재 턴의 제목·회의 시작 시각·상태·회의방·latest 범위를 공통 후보 검색기에 전달한 뒤 transcript·Activity 하이브리드 검색을 수행합니다. 제목 후보가 여러 개이거나 단일 유사 후보의 신뢰도가 부족하면 근거 검색 전에 사용자 선택을 요청합니다. 제목을 찾지 못했을 때 Workspace 전체 근거로 넓히려면 사용자가 명시적으로 요청한 경우에만 fallback=workspace_evidence를 사용합니다.",
       "riskLevel": "low",
       "executionMode": "contextual",
       "inputSchema": {
@@ -503,9 +503,22 @@
             "maxLength": 100,
             "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
           },
+          "latest": {
+            "type": "boolean",
+            "const": true,
+            "description": "제목이 아닌 상태·날짜·회의방 범위에서 가장 최신 회의록 하나를 선택합니다."
+          },
           "useSelectedMeetingReportCandidate": {
             "type": "boolean",
             "const": true
+          },
+          "fallback": {
+            "type": "string",
+            "enum": [
+              "none",
+              "workspace_evidence"
+            ],
+            "description": "제목 후보가 0건일 때의 동작입니다. 사용자가 Workspace 전체 검색을 명시하지 않았다면 none을 사용합니다."
           },
           "limit": {
             "type": "integer",
@@ -517,13 +530,21 @@
     },
     {
       "name": "list_meeting_reports",
-      "description": "Workspace MeetingReport 목록을 createdAt 내림차순으로 조회합니다. reportTitle은 표시 제목 COALESCE(user_title, title)을 기존 정규화 규칙으로 exact 우선 조회하고, exact 0건일 때만 구분자 경계의 제목 prefix 후보를 조회합니다. 기간과 개수를 생략하면 최신 회의록 1개를 반환합니다.",
+      "description": "Workspace MeetingReport 후보를 list 또는 exists intent로 조회합니다. 현재 턴의 표시 제목, 회의 시작 시각, 상태, 회의방, latest 조건을 모든 회의록 도구와 동일한 공통 후보 검색기에 전달합니다. 기간과 개수를 생략하면 가장 최근 회의의 회의록 1개를 반환합니다.",
       "riskLevel": "low",
       "executionMode": "auto",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "intent": {
+            "type": "string",
+            "enum": [
+              "exists",
+              "list"
+            ],
+            "description": "존재 여부만 확인하면 exists, 후보 목록을 반환하면 list입니다."
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -547,12 +568,17 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 500,
-            "description": "Agent 전용 MeetingReport 표시 제목 exact-first selector. exact 0건일 때만 구분자 경계의 prefix 후보를 허용하며, 앞뒤/연속 공백과 대소문자는 기존 MeetingService 규칙으로 정규화합니다."
+            "description": "Agent 전용 MeetingReport 표시 제목 selector. 공백과 대소문자를 정규화한 exact 검색 후 pg_trgm 유사 제목 검색을 수행합니다."
           },
           "roomName": {
             "type": "string",
             "minLength": 1,
             "maxLength": 100
+          },
+          "latest": {
+            "type": "boolean",
+            "const": true,
+            "description": "상태·날짜·회의방 필터를 적용한 뒤 가장 최신 회의록 하나를 선택합니다. 제목 중복 해소에는 사용하지 않습니다."
           },
           "limit": {
             "type": "integer",
@@ -564,7 +590,7 @@
     },
     {
       "name": "get_meeting_report",
-      "description": "MeetingReport 상세를 Agent용 보고서 projection으로 조회합니다.",
+      "description": "현재 턴의 공통 MeetingReport SearchScope로 후보를 정한 뒤 상세를 Agent용 보고서 projection으로 조회합니다.",
       "riskLevel": "low",
       "executionMode": "contextual",
       "inputSchema": {
@@ -605,6 +631,11 @@
             "minLength": 1,
             "maxLength": 100,
             "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
+          },
+          "latest": {
+            "type": "boolean",
+            "const": true,
+            "description": "제목이 아닌 상태·날짜·회의방 범위에서 가장 최신 회의록 하나를 선택합니다."
           },
           "useSelectedMeetingReportCandidate": {
             "type": "boolean",
@@ -615,7 +646,7 @@
     },
     {
       "name": "summarize_meeting_report",
-      "description": "MeetingReport를 Agent가 소비할 수 있는 sections/actionItems projection으로 요약합니다.",
+      "description": "현재 턴의 공통 MeetingReport SearchScope로 후보를 정한 뒤 sections/actionItems projection으로 요약합니다.",
       "riskLevel": "low",
       "executionMode": "contextual",
       "inputSchema": {
@@ -656,6 +687,11 @@
             "minLength": 1,
             "maxLength": 100,
             "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
+          },
+          "latest": {
+            "type": "boolean",
+            "const": true,
+            "description": "제목이 아닌 상태·날짜·회의방 범위에서 가장 최신 회의록 하나를 선택합니다."
           },
           "useSelectedMeetingReportCandidate": {
             "type": "boolean",
@@ -682,7 +718,7 @@
     },
     {
       "name": "search_meeting_transcript",
-      "description": "권한이 있는 MeetingReport의 발언 transcript와 안전한 실제 사용자 활동 evidence에서 literal keyword와 의미적으로 관련된 근거를 함께 검색합니다. 특정 회의록 범위는 MeetingReport selector로 해소하고, 출처 유형을 구분한 근거 기반 답변을 생성합니다.",
+      "description": "권한이 있는 MeetingReport의 발언 transcript와 안전한 실제 사용자 활동 evidence에서 literal keyword와 의미적으로 관련된 근거를 함께 검색합니다. 특정 회의록 범위는 현재 턴의 공통 MeetingReport SearchScope로 해소하고, 제목 0건을 Workspace 전체 검색으로 자동 확장하지 않습니다.",
       "riskLevel": "low",
       "executionMode": "contextual",
       "inputSchema": {
@@ -731,6 +767,11 @@
             "minLength": 1,
             "maxLength": 100,
             "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
+          },
+          "latest": {
+            "type": "boolean",
+            "const": true,
+            "description": "제목이 아닌 상태·날짜·회의방 범위에서 가장 최신 회의록 하나를 선택합니다."
           },
           "useSelectedMeetingReportCandidate": {
             "type": "boolean",
@@ -850,6 +891,11 @@
             "minLength": 1,
             "maxLength": 100,
             "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
+          },
+          "latest": {
+            "type": "boolean",
+            "const": true,
+            "description": "제목이 아닌 상태·날짜·회의방 범위에서 가장 최신 회의록 하나를 선택합니다."
           },
           "useSelectedMeetingReportCandidate": {
             "type": "boolean",
@@ -1029,6 +1075,11 @@
             "minLength": 1,
             "maxLength": 100,
             "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
+          },
+          "latest": {
+            "type": "boolean",
+            "const": true,
+            "description": "제목이 아닌 상태·날짜·회의방 범위에서 가장 최신 회의록 하나를 선택합니다."
           },
           "useSelectedMeetingReportCandidate": {
             "type": "boolean",

@@ -11,11 +11,18 @@ import {
   MeetingReportService,
   MeetingReportSummaryPayload
 } from "../../meeting-report/meeting-report.service";
+import { MeetingReportCandidateService } from "../../meeting-report/meeting-report-candidate.service";
 import {
   MeetingReportSearchService,
   type MeetingReportSearchCandidate,
   type MeetingReportSearchInput
 } from "../../meeting-report/meeting-report-search.service";
+import {
+  createMeetingReportSearchScope,
+  type MeetingReportSearchFallback,
+  type MeetingReportSearchIntent,
+  type MeetingReportSearchScope
+} from "../../meeting-report/meeting-report-search-scope";
 import {
   MeetingActionItemDeliveryInput,
   MeetingActionItemDeliveryService
@@ -61,6 +68,7 @@ type MeetingActionItemStatus =
 type MeetingActionItemSort = "newest" | "oldest";
 
 interface ListMeetingReportsInput {
+  intent?: "exists" | "list";
   status?: MeetingReportStatus;
   from?: string;
   to?: string;
@@ -68,6 +76,7 @@ interface ListMeetingReportsInput {
   reportTitle?: string;
   /** Agent-only filter. The Meeting REST API deliberately does not expose it. */
   roomName?: string;
+  latest?: true;
   limit: number;
 }
 
@@ -93,6 +102,7 @@ interface MeetingReportSelectorInput {
   status?: MeetingReportStatus;
   reportTitle?: string;
   roomName?: string;
+  latest?: true;
   useSelectedMeetingReportCandidate?: true;
 }
 
@@ -144,6 +154,7 @@ interface SearchMeetingTranscriptInput extends MeetingReportSelectorInput {
 
 interface SearchMeetingReportsInput extends MeetingReportSelectorInput {
   query: string;
+  fallback: MeetingReportSearchFallback;
   limit: number;
 }
 
@@ -272,11 +283,13 @@ const MEETING_ACTION_ITEM_STATUSES: readonly MeetingActionItemStatus[] = [
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LIST_INPUT_FIELDS = [
+  "intent",
   "status",
   "from",
   "to",
   "reportTitle",
   "roomName",
+  "latest",
   "limit"
 ];
 const REPORT_ID_INPUT_FIELDS = ["reportId"];
@@ -294,6 +307,7 @@ const REPORT_SELECTOR_INPUT_FIELDS = [
   "status",
   "reportTitle",
   "roomName",
+  "latest",
   "useSelectedMeetingReportCandidate"
 ];
 const REPORT_SUMMARY_INPUT_FIELDS = [...REPORT_SELECTOR_INPUT_FIELDS, "sections"];
@@ -316,6 +330,7 @@ const SEARCH_TRANSCRIPT_INPUT_FIELDS = ["query", ...REPORT_SELECTOR_INPUT_FIELDS
 const SEARCH_MEETING_REPORTS_INPUT_FIELDS = [
   "query",
   ...REPORT_SELECTOR_INPUT_FIELDS,
+  "fallback",
   "limit"
 ];
 const FIND_ACTION_ITEMS_INPUT_FIELDS = [
@@ -410,7 +425,9 @@ export class MeetingAgentToolsService {
     private readonly agentCandidateSelectionService?: AgentCandidateSelectionService,
     @Optional() private readonly documentSearchService?: DocumentSearchService,
     @Optional()
-    private readonly meetingReportSearchService?: MeetingReportSearchService
+    private readonly meetingReportSearchService?: MeetingReportSearchService,
+    @Optional()
+    private readonly meetingReportCandidateService?: MeetingReportCandidateService
   ) {}
 
   listDefinitions(): AgentToolDefinition<unknown>[] {
@@ -895,7 +912,7 @@ export class MeetingAgentToolsService {
     return {
       name: "search_meeting_reports",
       description:
-        "MeetingReport 검색의 단일 진입점입니다. 회의 시작 시각 범위 안에서 표시 제목 exact, pg_trgm 유사 제목, transcript·Activity 하이브리드 근거 검색을 순서대로 수행합니다. 제목 후보가 여러 개이거나 단일 유사 후보의 신뢰도가 부족하면 근거 검색 전에 사용자 선택을 요청합니다.",
+        "MeetingReport 내용·근거를 evidence intent로 검색합니다. 현재 턴의 제목·회의 시작 시각·상태·회의방·latest 범위를 공통 후보 검색기에 전달한 뒤 transcript·Activity 하이브리드 검색을 수행합니다. 제목 후보가 여러 개이거나 단일 유사 후보의 신뢰도가 부족하면 근거 검색 전에 사용자 선택을 요청합니다. 제목을 찾지 못했을 때 Workspace 전체 근거로 넓히려면 사용자가 명시적으로 요청한 경우에만 fallback=workspace_evidence를 사용합니다.",
       riskLevel: "low",
       executionMode: "contextual",
       requiresGroundedAnswer: true,
@@ -906,6 +923,12 @@ export class MeetingAgentToolsService {
         properties: {
           query: { type: "string", minLength: 1, maxLength: 1000 },
           ...this.meetingReportSelectorSchema(),
+          fallback: {
+            type: "string",
+            enum: ["none", "workspace_evidence"],
+            description:
+              "제목 후보가 0건일 때의 동작입니다. 사용자가 Workspace 전체 검색을 명시하지 않았다면 none을 사용합니다."
+          },
           limit: { type: "integer", minimum: 1, maximum: 20 }
         }
       },
@@ -926,7 +949,7 @@ export class MeetingAgentToolsService {
   private searchMeetingTranscriptDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "search_meeting_transcript",
-      description: "권한이 있는 MeetingReport의 발언 transcript와 안전한 실제 사용자 활동 evidence에서 literal keyword와 의미적으로 관련된 근거를 함께 검색합니다. 특정 회의록 범위는 MeetingReport selector로 해소하고, 출처 유형을 구분한 근거 기반 답변을 생성합니다.",
+      description: "권한이 있는 MeetingReport의 발언 transcript와 안전한 실제 사용자 활동 evidence에서 literal keyword와 의미적으로 관련된 근거를 함께 검색합니다. 특정 회의록 범위는 현재 턴의 공통 MeetingReport SearchScope로 해소하고, 제목 0건을 Workspace 전체 검색으로 자동 확장하지 않습니다.",
       riskLevel: "low",
       executionMode: "contextual",
       requiresGroundedAnswer: true,
@@ -956,11 +979,28 @@ export class MeetingAgentToolsService {
           context.workspaceId,
           { query: draft.query, ...(reportId ? { reportId } : {}) }
         );
+        const reportMetadata =
+          await this.meetingGroundingMetadataByReportId(
+            context,
+            sources.map((source) => source.reportId)
+          );
         const meetingGroundingSources = sources.map((source) => ({
           sourceType: source.sourceType === "transcript"
             ? "meeting_transcript" as const
             : "meeting_activity" as const,
           sourceRef: source.sourceId,
+          ...(reportMetadata.get(source.reportId)?.title
+            ? {
+                reportTitle:
+                  reportMetadata.get(source.reportId)?.title ?? undefined
+              }
+            : {}),
+          ...(reportMetadata.get(source.reportId)?.meetingStartedAt
+            ? {
+                meetingStartedAt:
+                  reportMetadata.get(source.reportId)?.meetingStartedAt
+              }
+            : {}),
           excerpt: source.content,
           score: source.score ?? 0,
           resourceRef: this.toMeetingReportResourceRef(source.reportId)
@@ -1083,12 +1123,24 @@ export class MeetingAgentToolsService {
       );
     }
 
+    const reportById = new Map(
+      result.reports.map((report) => [report.reportId, report])
+    );
     const meetingGroundingSources = result.evidence.map((source) => ({
       sourceType:
         source.sourceType === "transcript"
           ? ("meeting_transcript" as const)
           : ("meeting_activity" as const),
       sourceRef: source.sourceId,
+      ...(reportById.get(source.reportId)?.title
+        ? { reportTitle: reportById.get(source.reportId)?.title ?? undefined }
+        : {}),
+      ...(reportById.get(source.reportId)?.meetingStartedAt
+        ? {
+            meetingStartedAt:
+              reportById.get(source.reportId)?.meetingStartedAt
+          }
+        : {}),
       excerpt: source.content,
       score: source.score ?? 0,
       resourceRef: this.toMeetingReportResourceRef(source.reportId)
@@ -1129,6 +1181,11 @@ export class MeetingAgentToolsService {
     return {
       outputSummary: {
         status: "grounding_queued",
+        searchIntent: "evidence",
+        sort: "latest",
+        ...(input.latest ? { latest: true } : {}),
+        fallback: input.fallback,
+        fallbackApplied: result.fallbackApplied,
         searchStatus: result.status,
         matchedBy: result.matchedBy,
         diagnostics: {
@@ -1158,6 +1215,17 @@ export class MeetingAgentToolsService {
         ].sort()
       },
       groundingSources,
+      ...(input.reportTitle &&
+      result.diagnostics.exactTitleCount === 0 &&
+      result.diagnostics.fuzzyTitleCount === 0
+        ? {
+            groundingRetrievalContext: {
+              requestedReportTitle: input.reportTitle,
+              exactTitleMatchFound: false as const,
+              workspaceFallbackApplied: result.fallbackApplied
+            }
+          }
+        : {}),
       resourceRefs: [
         ...reportResourceRefs.values(),
         ...documentGroundingSources.map((source) => source.resourceRef)
@@ -1172,18 +1240,39 @@ export class MeetingAgentToolsService {
     reportIds?: string[]
   ): MeetingReportSearchInput {
     return {
-      ...(reportIds
-        ? { reportIds }
-        : input.reportTitle
-          ? { title: input.reportTitle }
-          : {}),
+      scope: this.toMeetingReportSearchScope(input, "evidence", {
+        limit: input.limit,
+        fallback: input.fallback
+      }),
       ...(includeContentQuery ? { contentQuery: input.query } : {}),
-      ...(input.from ? { from: input.from } : {}),
-      ...(input.to ? { to: input.to } : {}),
-      ...(input.status ? { status: input.status } : {}),
-      ...(input.roomName ? { roomName: input.roomName } : {}),
-      limit: input.limit
+      ...(reportIds ? { reportIds } : {})
     };
+  }
+
+  private toMeetingReportSearchScope(
+    input: MeetingReportSelectorInput,
+    intent: MeetingReportSearchIntent,
+    options: {
+      latest?: boolean;
+      limit?: number;
+      fallback?: MeetingReportSearchFallback;
+    } = {}
+  ): MeetingReportSearchScope {
+    return createMeetingReportSearchScope(
+      {
+        ...(input.reportTitle ? { title: input.reportTitle } : {}),
+        ...(input.from ? { from: input.from } : {}),
+        ...(input.to ? { to: input.to } : {}),
+        ...(input.status ? { status: input.status } : {}),
+        ...(input.roomName ? { roomName: input.roomName } : {}),
+        ...(options.latest || input.latest ? { latest: true } : {}),
+        ...(options.limit === undefined ? {} : { limit: options.limit }),
+        ...(options.fallback === undefined
+          ? {}
+          : { fallback: options.fallback })
+      },
+      intent
+    );
   }
 
   private toMeetingReportSearchCandidateResource(
@@ -1239,6 +1328,49 @@ export class MeetingAgentToolsService {
     }
   }
 
+  private async meetingGroundingMetadataByReportId(
+    context: AgentToolContext,
+    reportIds: string[]
+  ): Promise<
+    Map<
+      string,
+      {
+        title: string | null;
+        meetingStartedAt: string;
+      }
+    >
+  > {
+    const uniqueReportIds = [...new Set(reportIds)];
+    if (
+      uniqueReportIds.length === 0 ||
+      !this.meetingReportCandidateService
+    ) {
+      return new Map();
+    }
+    const result =
+      await this.meetingReportCandidateService.searchScope(
+        context.currentUserId,
+        context.workspaceId,
+        createMeetingReportSearchScope(
+          { limit: uniqueReportIds.length },
+          "evidence"
+        ),
+        {
+          reportIds: uniqueReportIds,
+          limit: uniqueReportIds.length
+        }
+      );
+    return new Map(
+      result.reports.map((report) => [
+        report.reportId,
+        {
+          title: report.title,
+          meetingStartedAt: report.meetingStartedAt
+        }
+      ])
+    );
+  }
+
   private toMeetingReportResourceRef(reportId: string): AgentResourceRef {
     return {
       domain: "meeting",
@@ -1255,17 +1387,30 @@ export class MeetingAgentToolsService {
     return this.meetingReportSearchService;
   }
 
+  private requireMeetingReportCandidateService(): MeetingReportCandidateService {
+    if (!this.meetingReportCandidateService) {
+      throw new Error("MeetingReportCandidateService is required");
+    }
+    return this.meetingReportCandidateService;
+  }
+
   private listMeetingReportsDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "list_meeting_reports",
       description:
-        "Workspace MeetingReport 목록을 createdAt 내림차순으로 조회합니다. reportTitle은 표시 제목 COALESCE(user_title, title)을 기존 정규화 규칙으로 exact 우선 조회하고, exact 0건일 때만 구분자 경계의 제목 prefix 후보를 조회합니다. 기간과 개수를 생략하면 최신 회의록 1개를 반환합니다.",
+        "Workspace MeetingReport 후보를 list 또는 exists intent로 조회합니다. 현재 턴의 표시 제목, 회의 시작 시각, 상태, 회의방, latest 조건을 모든 회의록 도구와 동일한 공통 후보 검색기에 전달합니다. 기간과 개수를 생략하면 가장 최근 회의의 회의록 1개를 반환합니다.",
       riskLevel: "low",
       executionMode: "auto",
       inputSchema: {
         type: "object",
         additionalProperties: false,
         properties: {
+          intent: {
+            type: "string",
+            enum: ["exists", "list"],
+            description:
+              "존재 여부만 확인하면 exists, 후보 목록을 반환하면 list입니다."
+          },
           status: {
             type: "string",
             enum: [...MEETING_REPORT_STATUSES]
@@ -1277,9 +1422,15 @@ export class MeetingAgentToolsService {
             minLength: 1,
             maxLength: 500,
             description:
-              "Agent 전용 MeetingReport 표시 제목 exact-first selector. exact 0건일 때만 구분자 경계의 prefix 후보를 허용하며, 앞뒤/연속 공백과 대소문자는 기존 MeetingService 규칙으로 정규화합니다."
+              "Agent 전용 MeetingReport 표시 제목 selector. 공백과 대소문자를 정규화한 exact 검색 후 pg_trgm 유사 제목 검색을 수행합니다."
           },
           roomName: { type: "string", minLength: 1, maxLength: 100 },
+          latest: {
+            type: "boolean",
+            const: true,
+            description:
+              "상태·날짜·회의방 필터를 적용한 뒤 가장 최신 회의록 하나를 선택합니다. 제목 중복 해소에는 사용하지 않습니다."
+          },
           limit: {
             type: "integer",
             minimum: 1,
@@ -1296,7 +1447,7 @@ export class MeetingAgentToolsService {
   private getMeetingReportDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "get_meeting_report",
-      description: "MeetingReport 상세를 Agent용 보고서 projection으로 조회합니다.",
+      description: "현재 턴의 공통 MeetingReport SearchScope로 후보를 정한 뒤 상세를 Agent용 보고서 projection으로 조회합니다.",
       riskLevel: "low",
       executionMode: "contextual",
       inputSchema: {
@@ -1332,7 +1483,7 @@ export class MeetingAgentToolsService {
     return {
       name: "summarize_meeting_report",
       description:
-        "MeetingReport를 Agent가 소비할 수 있는 sections/actionItems projection으로 요약합니다.",
+        "현재 턴의 공통 MeetingReport SearchScope로 후보를 정한 뒤 sections/actionItems projection으로 요약합니다.",
       riskLevel: "low",
       executionMode: "contextual",
       inputSchema: {
@@ -1380,12 +1531,31 @@ export class MeetingAgentToolsService {
     context: AgentToolContext,
     input: ListMeetingReportsInput
   ): Promise<AgentToolExecutionResult> {
-    const result = await this.meetingReportService.listReportsForAgent(
+    const scope = this.toMeetingReportSearchScope(
+      input,
+      input.intent ?? "list",
+      {
+        latest:
+          input.latest === true ||
+          (input.reportTitle === undefined && input.limit === 1),
+        limit: input.limit
+      }
+    );
+    const candidateResult =
+      await this.requireMeetingReportCandidateService().searchScope(
+        context.currentUserId,
+        context.workspaceId,
+        scope
+      );
+    const candidateIds = candidateResult.reports
+      .slice(0, input.limit)
+      .map((report) => report.reportId);
+    const result = await this.meetingReportService.listReportsByIdsForAgent(
       context.currentUserId,
       context.workspaceId,
-      input
+      candidateIds
     );
-    const selectedReports = result.reports.slice(0, input.limit);
+    const selectedReports = result.reports;
     const reports = selectedReports.map((report) =>
       this.normalizeMeetingReportForAgent(report, {
         sectionTextLimit: LIST_SECTION_TEXT_LIMIT
@@ -1394,11 +1564,16 @@ export class MeetingAgentToolsService {
 
     return {
       outputSummary: {
+        searchIntent: scope.intent,
+        sort: scope.sort,
+        ...(scope.latest ? { latest: true } : {}),
         ...(input.reportTitle ? { reportTitle: input.reportTitle } : {}),
         ...(input.from ? { from: input.from } : {}),
         ...(input.to ? { to: input.to } : {}),
         ...(input.status ? { reportStatus: input.status } : {}),
         ...(input.roomName ? { roomName: input.roomName } : {}),
+        matchedBy: candidateResult.matchedBy,
+        totalCandidates: candidateResult.totalCount,
         count: reports.length,
         reports
       },
@@ -2766,16 +2941,22 @@ export class MeetingAgentToolsService {
       return this.resolveLatestCandidateReference(context, "meeting_report");
     }
     const resolver = this.requireMeetingResourceResolver();
-    const selector = {
-      ...(input.from ? { from: input.from } : {}),
-      ...(input.to ? { to: input.to } : {}),
-      ...(input.status ? { status: input.status } : {}),
-      ...(input.reportTitle ? { reportTitle: input.reportTitle } : {}),
-      ...(input.roomName ? { roomName: input.roomName } : {})
-    };
-    return Object.keys(selector).length === 0
-      ? resolver.resolveLatestReport(context)
-      : resolver.resolveReport(context, selector);
+    const hasExplicitScope = Boolean(
+      input.from ||
+        input.to ||
+        input.status ||
+        input.reportTitle ||
+        input.roomName ||
+        input.latest
+    );
+    const scope = this.toMeetingReportSearchScope(input, "summary", {
+      latest: input.latest === true || !hasExplicitScope,
+      limit:
+        input.latest === true || !hasExplicitScope
+          ? 1
+          : undefined
+    });
+    return resolver.resolveReport(context, scope);
   }
 
   private async resolveLatestCandidateReference(
@@ -2972,7 +3153,17 @@ export class MeetingAgentToolsService {
     if (from && to && from >= to) {
       throw badRequest("from must be before to");
     }
+    const intent = object.intent;
+    if (intent !== undefined && intent !== "exists" && intent !== "list") {
+      throw badRequest("intent must be exists or list");
+    }
+    const latest = this.readConstTrue(object.latest, "latest");
+    const explicitLimit = this.readOptionalLimit(object.limit);
+    if (latest && explicitLimit !== undefined && explicitLimit !== 1) {
+      throw badRequest("latest may only be combined with limit 1");
+    }
     return {
+      ...(intent === undefined ? {} : { intent }),
       ...(object.status === undefined
         ? {}
         : { status: this.readOptionalStatus(object.status) }),
@@ -2990,8 +3181,9 @@ export class MeetingAgentToolsService {
       ...(object.roomName === undefined
         ? {}
         : { roomName: this.requireBoundedString(object.roomName, "roomName", 100) }),
+      ...(latest ? { latest: true } : {}),
       limit:
-        this.readOptionalLimit(object.limit) ??
+        explicitLimit ??
         (object.reportTitle === undefined ? 1 : 4)
     };
   }
@@ -3076,6 +3268,7 @@ export class MeetingAgentToolsService {
         "useSelectedMeetingReportCandidate may only be true when provided"
       );
     }
+    const latest = this.readConstTrue(object.latest, "latest");
     if (
       [
         object.contextRef !== undefined,
@@ -3085,7 +3278,8 @@ export class MeetingAgentToolsService {
           to ||
           object.status !== undefined ||
           object.reportTitle !== undefined ||
-          object.roomName !== undefined
+          object.roomName !== undefined ||
+          latest === true
         )
       ].filter(Boolean).length > 1
     ) {
@@ -3119,6 +3313,7 @@ export class MeetingAgentToolsService {
       ...(object.roomName === undefined
         ? {}
         : { roomName: this.requireBoundedString(object.roomName, "roomName", 100) }),
+      ...(latest ? { latest: true } : {}),
       ...(useSelectedMeetingReportCandidate
         ? { useSelectedMeetingReportCandidate: true }
         : {})
@@ -3440,6 +3635,12 @@ export class MeetingAgentToolsService {
         maxLength: 100,
         description: "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
       },
+      latest: {
+        type: "boolean",
+        const: true,
+        description:
+          "제목이 아닌 상태·날짜·회의방 범위에서 가장 최신 회의록 하나를 선택합니다."
+      },
       useSelectedMeetingReportCandidate: { type: "boolean", const: true }
     };
   }
@@ -3486,6 +3687,7 @@ export class MeetingAgentToolsService {
         status: object.status,
         reportTitle: object.reportTitle,
         roomName: object.roomName,
+        latest: object.latest,
         useSelectedMeetingReportCandidate:
           object.useSelectedMeetingReportCandidate
       })
@@ -3516,6 +3718,10 @@ export class MeetingAgentToolsService {
     if (limit > 20) {
       throw badRequest("limit must be between 1 and 20");
     }
+    const fallback = object.fallback ?? "none";
+    if (fallback !== "none" && fallback !== "workspace_evidence") {
+      throw badRequest("fallback must be none or workspace_evidence");
+    }
     return {
       query,
       ...this.validateMeetingReportSelectorInput({
@@ -3525,9 +3731,11 @@ export class MeetingAgentToolsService {
         status: object.status,
         reportTitle: object.reportTitle,
         roomName: object.roomName,
+        latest: object.latest,
         useSelectedMeetingReportCandidate:
           object.useSelectedMeetingReportCandidate
       }),
+      fallback,
       limit
     };
   }
@@ -3540,6 +3748,7 @@ export class MeetingAgentToolsService {
       input.status !== undefined ||
       input.reportTitle !== undefined ||
       input.roomName !== undefined ||
+      input.latest === true ||
       input.useSelectedMeetingReportCandidate === true
     );
   }

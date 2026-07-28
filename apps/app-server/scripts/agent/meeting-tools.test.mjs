@@ -448,33 +448,118 @@ class FakeMeetingService {
     };
   }
 
-  async listReportsForAgent(currentUserId, workspaceId, query) {
+  async search(currentUserId, workspaceId, input) {
     this.calls.push({
-      method: "listReportsForAgent",
+      method: "searchMeetingReportCandidates",
       currentUserId,
       workspaceId,
-      query
+      input
     });
     let reports = this.reports;
-    if (query.reportTitle) {
-      const normalizedTitle = query.reportTitle.toLowerCase();
-      const exactReports = this.reports.filter(
-        (report) => report.title.toLowerCase() === normalizedTitle
-      );
-      reports = exactReports.length > 0
-        ? exactReports
-        : this.reports.filter((report) => {
-            const title = report.title.toLowerCase();
-            if (!title.startsWith(normalizedTitle)) return false;
-            return [" ", ":", "：", "-", "–", "—", "|", "/", "·"].includes(
-              title.slice(normalizedTitle.length, normalizedTitle.length + 1)
-            );
-          });
+    if (input.reportIds) {
+      const reportIds = new Set(input.reportIds);
+      reports = reports.filter((report) => reportIds.has(report.id));
     }
+    if (input.status) {
+      reports = reports.filter((report) => report.status === input.status);
+    }
+    if (input.from) {
+      reports = reports.filter((report) => report.createdAt >= input.from);
+    }
+    if (input.to) {
+      reports = reports.filter((report) => report.createdAt < input.to);
+    }
+
+    let matchedBy = "filters_only";
+    let exactTitleCount = 0;
+    let fuzzyTitleCount = 0;
+    if (input.title) {
+      const normalizedTitle = input.title.trim().replace(/\s+/g, " ").toLowerCase();
+      const exactReports = reports.filter(
+        (report) =>
+          report.title.trim().replace(/\s+/g, " ").toLowerCase() ===
+          normalizedTitle
+      );
+      exactTitleCount = exactReports.length;
+      if (exactReports.length > 0) {
+        reports = exactReports;
+        matchedBy = "exact_title";
+      } else {
+        reports = reports.filter((report) => {
+          const title = report.title
+            .trim()
+            .replace(/\s+/g, " ")
+            .toLowerCase();
+          return (
+            title.startsWith(normalizedTitle) ||
+            title.includes(normalizedTitle) ||
+            normalizedTitle.includes(title)
+          );
+        });
+        fuzzyTitleCount = reports.length;
+        matchedBy = reports.length > 0 ? "fuzzy_title" : "none";
+      }
+    }
+
+    const totalCount = reports.length;
+    const candidates = reports.slice(0, input.limit ?? reports.length).map(
+      (report) => ({
+        reportId: report.id,
+        meetingId: report.meetingId,
+        recordingId: report.recordingId,
+        status: report.status,
+        title: report.title,
+        summary: report.summary,
+        discussionPoints: report.discussionPoints,
+        decisions: report.decisions,
+        meetingStartedAt: report.createdAt,
+        reportCreatedAt: report.createdAt,
+        roomName: "기본 회의실",
+        ...(matchedBy === "fuzzy_title" ? { titleSimilarity: 0.8 } : {})
+      })
+    );
     return {
-      reports: reports.slice(0, query.limit ?? reports.length).map((report) =>
-        toSummaryReport(report)
-      )
+      status:
+        totalCount === 0
+          ? "not_found"
+          : totalCount === 1
+            ? "resolved"
+            : "candidates",
+      matchedBy,
+      reports: candidates,
+      totalCount,
+      diagnostics: { exactTitleCount, fuzzyTitleCount }
+    };
+  }
+
+  async searchScope(currentUserId, workspaceId, scope, overrides = {}) {
+    return this.search(currentUserId, workspaceId, {
+      ...(scope.title ? { title: scope.title } : {}),
+      ...(scope.from ? { from: scope.from } : {}),
+      ...(scope.to ? { to: scope.to } : {}),
+      ...(scope.status ? { status: scope.status } : {}),
+      ...(scope.roomName ? { roomName: scope.roomName } : {}),
+      ...(overrides.reportIds ? { reportIds: overrides.reportIds } : {}),
+      limit:
+        overrides.limit ??
+        (scope.latest && !scope.title ? 1 : scope.limit)
+    });
+  }
+
+  async listReportsByIdsForAgent(currentUserId, workspaceId, reportIds) {
+    this.calls.push({
+      method: "listReportsByIdsForAgent",
+      currentUserId,
+      workspaceId,
+      reportIds
+    });
+    const byId = new Map(this.reports.map((report) => [report.id, report]));
+    return {
+      nextCursor: null,
+      reports: reportIds.flatMap((reportId) => {
+        const report = byId.get(reportId);
+        return report ? [toSummaryReport(report)] : [];
+      })
     };
   }
 
@@ -534,18 +619,23 @@ class FakeMeetingTranscriptRagService {
 class FakeMeetingReportSearchService {
   constructor({ preflightResult, result } = {}) {
     this.calls = [];
-    this.preflightResult = preflightResult ?? {
-      status: "resolved",
-      matchedBy: "exact_title",
-      reports: [],
-      evidence: [],
-      diagnostics: {
-        exactTitleCount: 1,
-        fuzzyTitleCount: 0,
-        hybridReportCount: 0
-      }
+    this.preflightResult = {
+      fallbackApplied: false,
+      ...(preflightResult ?? {
+        status: "resolved",
+        matchedBy: "exact_title",
+        reports: [],
+        evidence: [],
+        diagnostics: {
+          exactTitleCount: 1,
+          fuzzyTitleCount: 0,
+          hybridReportCount: 0
+        }
+      })
     };
-    this.result = result ?? this.preflightResult;
+    this.result = result
+      ? { fallbackApplied: false, ...result }
+      : this.preflightResult;
   }
 
   async search(currentUserId, workspaceId, input) {
@@ -609,7 +699,16 @@ function createRegistry() {
     meetingService, meetingService,
     new FakeMeetingTranscriptRagService(),
     undefined,
-    new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService())
+    new MeetingAgentResourceResolver(
+      meetingService,
+      meetingService,
+      new FakeWorkspaceService(),
+      meetingService
+    ),
+    undefined,
+    undefined,
+    undefined,
+    meetingService
   );
   const registry = new AgentToolRegistryService(undefined, meetingTools);
 
@@ -624,6 +723,15 @@ const context = {
   workspaceId: WORKSPACE_ID,
   runId: RUN_ID
 };
+
+function reportScope(values = {}, intent = "summary") {
+  return {
+    ...values,
+    intent,
+    sort: "latest",
+    fallback: "none"
+  };
+}
 
 process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
 
@@ -697,10 +805,15 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
   const preparation = await tool.prepareExecution(context, input);
   assert.deepEqual(preparation, { kind: "execute" });
   assert.deepEqual(searchService.calls[0].input, {
-    title: "API 설계 회의",
-    from: "2026-07-15T00:00:00.000Z",
-    to: "2026-07-16T00:00:00.000Z",
-    limit: 5
+    scope: {
+      title: "API 설계 회의",
+      from: "2026-07-15T00:00:00.000Z",
+      to: "2026-07-16T00:00:00.000Z",
+      intent: "evidence",
+      sort: "latest",
+      limit: 5,
+      fallback: "none"
+    }
   });
 
   const result = await tool.execute(context, input);
@@ -708,12 +821,22 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
   assert.equal(result.outputSummary.matchedBy, "exact_title");
   assert.equal(result.outputSummary.sourceCount, 1);
   assert.equal(result.groundingSources[0].sourceType, "meeting_transcript");
+  assert.equal(result.groundingSources[0].reportTitle, "API 설계 회의");
+  assert.equal(
+    result.groundingSources[0].meetingStartedAt,
+    "2026-07-15T01:00:00.000Z"
+  );
   assert.deepEqual(searchService.calls[1].input, {
-    title: "API 설계 회의",
+    scope: {
+      title: "API 설계 회의",
+      from: "2026-07-15T00:00:00.000Z",
+      to: "2026-07-16T00:00:00.000Z",
+      intent: "evidence",
+      sort: "latest",
+      limit: 5,
+      fallback: "none"
+    },
     contentQuery: "인증 방식을 왜 OAuth로 정했어?",
-    from: "2026-07-15T00:00:00.000Z",
-    to: "2026-07-16T00:00:00.000Z",
-    limit: 5
   });
 }
 
@@ -845,7 +968,12 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
       meetingService, meetingService,
       ragService,
       undefined,
-      new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService())
+      new MeetingAgentResourceResolver(
+        meetingService,
+        meetingService,
+        new FakeWorkspaceService(),
+        meetingService
+      )
     )
   );
   const tool = registry.getDefinition("search_meeting_transcript");
@@ -931,7 +1059,12 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
       meetingService, meetingService,
       new FakeMeetingTranscriptRagService([]),
       undefined,
-      new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService())
+      new MeetingAgentResourceResolver(
+        meetingService,
+        meetingService,
+        new FakeWorkspaceService(),
+        meetingService
+      )
     )
   );
   const tool = registry.getDefinition("search_meeting_transcript");
@@ -963,7 +1096,12 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
     meetingService, meetingService,
     ragService,
     undefined,
-    new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService()),
+    new MeetingAgentResourceResolver(
+      meetingService,
+      meetingService,
+      new FakeWorkspaceService(),
+      meetingService
+    ),
     undefined,
     documentSearchService
   );
@@ -1014,7 +1152,12 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
     meetingService, meetingService,
     new FakeMeetingTranscriptRagService(),
     undefined,
-    new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService()),
+    new MeetingAgentResourceResolver(
+      meetingService,
+      meetingService,
+      new FakeWorkspaceService(),
+      meetingService
+    ),
     undefined,
     documentSearchService
   );
@@ -1335,6 +1478,7 @@ class FakeCandidateSelectionDatabase {
     const resolver = new MeetingAgentResourceResolver(
       meetingService, meetingService,
       workspaceService,
+      meetingService,
       {
         async resolveMeetingReference(_context, contextRef) {
           if (contextRef === "ctx_0123456789abcdef01234567") {
@@ -1620,7 +1764,10 @@ class FakeCandidateSelectionDatabase {
     );
     meetingService.staleMeetingIds.clear();
 
-    const report = await resolver.resolveReport(context, { status: "COMPLETED" });
+    const report = await resolver.resolveReport(
+      context,
+      reportScope({ status: "COMPLETED" })
+    );
     assert.equal(report.kind, "selected");
     assert.equal(report.candidate.status, "COMPLETED");
     meetingService.staleReportIds.add(report.reference.resourceId);
@@ -1633,7 +1780,10 @@ class FakeCandidateSelectionDatabase {
     const latestReport = await resolver.resolveLatestReport(context);
     assert.equal(latestReport.kind, "selected");
     assert.equal(latestReport.reference.resourceId, REPORT_ID);
-    const ambiguousReport = await resolver.resolveReport(context, {});
+    const ambiguousReport = await resolver.resolveReport(
+      context,
+      reportScope()
+    );
     assert.equal(ambiguousReport.kind, "needs_clarification");
     assert.equal(ambiguousReport.reason, "ambiguous");
     assert.deepEqual(
@@ -1763,7 +1913,8 @@ class FakeCandidateSelectionDatabase {
   const meetingService = new FakeMeetingService();
   const resolver = new MeetingAgentResourceResolver(
     meetingService, meetingService,
-    new FakeWorkspaceService()
+    new FakeWorkspaceService(),
+    meetingService
   );
   const meetingTools = new MeetingAgentToolsService(
     meetingService, meetingService,
@@ -1915,7 +2066,8 @@ function errorCode(error) {
   const workspaceService = new FakeWorkspaceService();
   const resolver = new MeetingAgentResourceResolver(
     meetingService, meetingService,
-    workspaceService
+    workspaceService,
+    meetingService
   );
   const meetingTools = new MeetingAgentToolsService(
     meetingService, meetingService,
@@ -1954,7 +2106,8 @@ function errorCode(error) {
   const meetingService = new FakeMeetingService();
   const resolver = new MeetingAgentResourceResolver(
     meetingService, meetingService,
-    new FakeWorkspaceService()
+    new FakeWorkspaceService(),
+    meetingService
   );
   const selectedMemberId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   const candidateSelectionService = {
@@ -2224,10 +2377,10 @@ function errorCode(error) {
   assert.equal(result.resourceRefs[0].resourceType, "meeting_report");
   assert.equal(result.resourceRefs[0].label, "Backend meeting");
   assert.deepEqual(meetingService.calls[0], {
-    method: "listReportsForAgent",
+    method: "searchMeetingReportCandidates",
     currentUserId: USER_ID,
     workspaceId: WORKSPACE_ID,
-    query: {
+    input: {
       status: "COMPLETED",
       limit: 20
     }
@@ -2242,7 +2395,7 @@ function errorCode(error) {
     minLength: 1,
     maxLength: 500,
     description:
-      "Agent 전용 MeetingReport 표시 제목 exact-first selector. exact 0건일 때만 구분자 경계의 prefix 후보를 허용하며, 앞뒤/연속 공백과 대소문자는 기존 MeetingService 규칙으로 정규화합니다."
+      "Agent 전용 MeetingReport 표시 제목 selector. 공백과 대소문자를 정규화한 exact 검색 후 pg_trgm 유사 제목 검색을 수행합니다."
   });
   const input = tool.validateInput({ reportTitle: "  Backend meeting  " });
   const result = await tool.execute(context, input);
@@ -2253,7 +2406,10 @@ function errorCode(error) {
   });
   assert.equal(result.outputSummary.reportTitle, "Backend meeting");
   assert.equal(result.outputSummary.count, 1);
-  assert.deepEqual(meetingService.calls[0].query, input);
+  assert.deepEqual(meetingService.calls[0].input, {
+    title: "Backend meeting",
+    limit: 4
+  });
 }
 
 {
@@ -2289,11 +2445,15 @@ function errorCode(error) {
   const result = await tool.execute(context, input);
 
   assert.deepEqual(result.outputSummary, {
+    searchIntent: "list",
+    sort: "latest",
     reportTitle: "Backend meeting",
     from: "2026-07-08T00:00:00.000Z",
     to: "2026-07-09T00:00:00.000Z",
     reportStatus: "COMPLETED",
     roomName: "Backend",
+    matchedBy: "exact_title",
+    totalCandidates: 1,
     count: 1,
     reports: result.outputSummary.reports
   });
@@ -2309,7 +2469,11 @@ function errorCode(error) {
   );
 
   assert.deepEqual(result.outputSummary, {
+    searchIntent: "list",
+    sort: "latest",
     reportTitle: "없는 회의록",
+    matchedBy: "none",
+    totalCandidates: 0,
     count: 0,
     reports: []
   });
@@ -2353,7 +2517,7 @@ function errorCode(error) {
   assert.equal(result.outputSummary.reports[0].reportId, REPORT_ID);
   assert.equal(result.resourceRefs.length, 1);
   assert.equal(result.resourceRefs[0].resourceId, REPORT_ID);
-  assert.deepEqual(meetingService.calls[0].query, { limit: 1 });
+  assert.deepEqual(meetingService.calls[0].input, { limit: 1 });
 }
 
 {
@@ -2365,7 +2529,7 @@ function errorCode(error) {
   );
 
   assert.equal(result.outputSummary.count, 1);
-  assert.deepEqual(meetingService.calls[0].query, {
+  assert.deepEqual(meetingService.calls[0].input, {
     roomName: "디자인 회의실",
     limit: 1
   });
@@ -2385,7 +2549,7 @@ function errorCode(error) {
 
   assert.equal(result.outputSummary.count, 1);
   assert.equal(result.outputSummary.reports[0].reportId, REPORT_ID);
-  assert.deepEqual(meetingService.calls[0].query, { limit: 1 });
+  assert.deepEqual(meetingService.calls[0].input, { limit: 1 });
 }
 
 {
@@ -2434,17 +2598,17 @@ function errorCode(error) {
   assert.equal(result.outputSummary.report.reportId, REPORT_ID);
   assert.deepEqual(
     meetingService.calls
-      .filter((call) => call.method === "listReportsForAgent")
-      .map((call) => call.query),
+      .filter((call) => call.method === "searchMeetingReportCandidates")
+      .map((call) => call.input),
     [
       {
-        reportTitle: "Backend meeting",
+        title: "Backend meeting",
         from: "2026-07-08T00:00:00.000Z",
         to: "2026-07-09T00:00:00.000Z",
         limit: 4
       },
       {
-        reportTitle: "Backend meeting",
+        title: "Backend meeting",
         from: "2026-07-08T00:00:00.000Z",
         to: "2026-07-09T00:00:00.000Z",
         limit: 4

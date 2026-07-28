@@ -1286,6 +1286,7 @@ export class AgentExecutionService {
           outputSummary,
           resourceRefs,
           groundingSources: result.groundingSources,
+          groundingRetrievalContext: result.groundingRetrievalContext,
           meetingReportHybridContext,
           executionLease: lease
         });

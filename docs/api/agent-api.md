@@ -122,6 +122,22 @@ metadata retrieval 경로도 검증된 `capabilityIds`와 실제 planner tool이
 `list_meeting_reports → search_meeting_transcript` chain을 호환 fallback으로 유지한다.
 두 경로를 같은 요청에서 동시에 실행하거나 결과를 비교하는 online shadow는 수행하지 않는다.
 
+Agent catalog의 tool 개수와 별개로 App Server의 회의록 대상 해소 계약은 하나다.
+`list_meeting_reports`, `get_meeting_report`, `summarize_meeting_report`,
+`search_meeting_reports`는 모두 `MeetingReportCandidateService`를 거쳐 표시 제목 exact·pg_trgm
+fuzzy, `meetings.started_at`, 상태·회의방, 사용자 권한과 ranking을 동일하게 적용한다.
+목록 tool은 후보 ID를 권한 재검증이 포함된 단일 batch query로 projection하고, 상세·요약 tool은
+다건 또는 신뢰도가 낮은 단일 fuzzy 후보를 자동 확정하지 않는다. 내용 검색은 같은 후보 범위를
+해소한 다음 transcript·Activity RAG를 수행한다. 이 검색과 확장은 운영 RDS PostgreSQL에서 실행하며
+Supabase 검색 경로를 사용하지 않는다.
+
+AI Worker는 매 사용자 턴의 제목·날짜·상태·회의방·intent·latest·limit·fallback을 하나의
+`MeetingReportSearchScope`로 다시 만든다. 사용자가 같은 조건 유지를 명시하지 않으면 이전 턴 selector를
+제거하고, 모든 MeetingReport tool은 이 Scope를 App Server의 공통 후보 검색기에 전달한다. Router가
+선택한 list/summary/evidence tool은 자연어의 특정 단어를 근거로 정규화 단계에서 강제 교체하지 않는다.
+`fallback` 기본값은 `none`이며, 제목 0건 뒤 Workspace 전체 근거 검색은 사용자가 명시적으로 허용한
+`evidence` 요청에서만 `workspace_evidence`로 실행한다.
+
 `delegate_canvas_agent`가 실행되면 일반 Agent run은 `running`을 유지하고 Canvas Agent child run의
 terminal 상태를 기다린다. App Server는 사용자의 최신 원문 prompt를 수정하거나 요약하지 않고 child run에
 전달하며 `source=general_agent_delegate`, `parentAgentRunId=일반 Agent run id`로 연결한다. child run이
@@ -1173,7 +1189,7 @@ Status code: `200 OK`
 | `list_meeting_rooms` | `low` | 가능 | Workspace 회의방과 방별 현재 Meeting·녹음 상태를 조회한다. |
 | `get_active_meeting` | `low` | 가능 | 현재 사용자의 active Meeting과 회의방, 경과 시간을 조회한다. |
 | `get_meeting_participants` | `low` | 조건부 | 현재 참여 Meeting 또는 `roomName` selector로 내부 해소 후 참여자를 조회한다. |
-| `list_meeting_reports` | `low` | 가능 | Agent 내부 `MeetingService.listReportsForAgent`; 공개 Meeting REST API는 변경하지 않는다. |
+| `list_meeting_reports` | `low` | 가능 | `MeetingReportCandidateService`로 후보를 찾고 권한 재검증 batch query로 목록 projection을 반환한다. 공개 Meeting REST API는 변경하지 않는다. |
 | `get_meeting_report` | `low` | 가능 | `GET /workspaces/{workspaceId}/meeting-reports/{reportId}` |
 | `summarize_meeting_report` | `low` | 가능 | `sections` selector로 요청한 요약·논의사항·결정사항·후속 작업만 bounded projection으로 반환한다. transcript 전문은 저장하지 않는다. |
 | `search_meeting_transcript` | `low` | 가능 | 권한 있는 transcript source를 검색하고 grounded-answer 경로를 시작한다. |
@@ -1390,16 +1406,13 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
   종료 tool은 서버가 current recording을 다시 조회한다.
 - Agent는 MeetingReport 목록/상세를 읽고 요약할 수 있다.
 - 목록 응답의 요약 필드를 우선 사용한다.
-- `list_meeting_reports`는 `from`, `to`, `status`, Agent 내부 `reportTitle`, `roomName`, `limit`을
-  지원한다. `reportTitle`은 1~500자의 Agent 전용 exact-first selector이며
-  `COALESCE(user_title, title)`에 기존 `MeetingService`의 앞뒤 공백 제거, 연속 공백 축약, 대소문자
-  정규화를 그대로 적용한다. exact 결과가 0건일 때만 공백, 콜론, 대시 등 구분자 경계로 이어지는
-  제목 prefix 후보를 최대 selector 한도 안에서 조회한다. 따라서 `금요일 데일리 스크럼`은
-  `금요일 데일리 스크럼: 워커 분리, ...`를 후보로 찾지만 제목 중간의 임의 substring이나 fuzzy
-  match는 허용하지 않는다. status/date/roomName/limit과 조합할 수 있다. 제목 selector 없이 기간과
-  개수를 생략하면 `createdAt DESC, id ASC` 정렬의 최신 report 1개를 반환한다. `reportTitle`과
-  `roomName`은 Agent 내부 도메인 조회 전용이며 공개 Meeting REST API의 request/response/endpoint는
-  변경하지 않는다.
+- `list_meeting_reports`는 `intent`, `from`, `to`, `status`, Agent 내부 `reportTitle`, `roomName`,
+  `latest`, `limit`을 지원한다. `reportTitle`은 `COALESCE(user_title, title)`을 공백·대소문자
+  정규화한 exact 검색 후, exact 0건이면 RDS PostgreSQL의 `pg_trgm` fuzzy 검색으로 이어진다.
+  status/date/roomName/latest/limit과 조합할 수 있고 정렬 기준은 `meetings.started_at DESC`,
+  `meeting_reports.created_at DESC`, ID 순이다. 제목·기간·개수를 생략하거나 `latest=true`이면
+  필터 적용 후 최신 report 1개를 반환한다. `reportTitle`과 `roomName`은 Agent 내부 도메인 조회
+  전용이며 공개 Meeting REST API의 request/response/endpoint는 변경하지 않는다.
 - 특정 MeetingReport 상세/요약도 UUID `reportId`를 받지 않는다. selector는 `[from, to)`, `status`,
   Agent 내부 `roomName`과 표시 제목 exact match용 `reportTitle`을 조합할 수 있다. `roomName`은 회의가 열린
   회의방 이름이고 `reportTitle`은 `COALESCE(user_title, title)`로 계산한 회의록 제목이므로 서로 대체하지
@@ -1407,8 +1420,8 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
   선택을 요청한다. 후보 label은 요약문 대신 회의록 제목을 사용한다.
 - 상세 조회의 `transcriptText`는 답변 생성에 사용할 수 있지만 Agent run/step/confirmation에는 전문 저장하지 않는다.
 - `search_meeting_reports`는 MeetingReport 내용·근거 검색의 기본 단일 진입점이다. planner-facing
-  schema는 필수 `query`와 선택 `reportTitle`, `[from, to)`, `status`, `roomName`, `limit`,
-  server-owned `contextRef`/후보 선택 플래그만 허용하며 raw `reportId`를 받지 않는다.
+  schema는 필수 `query`와 선택 `reportTitle`, `[from, to)`, `status`, `roomName`, `latest`, `limit`,
+  `fallback`, server-owned `contextRef`/후보 선택 플래그만 허용하며 raw `reportId`를 받지 않는다.
 - `from`과 `to`는 회의록 생성 시각이 아니라 `meetings.started_at`에 적용한다. App Server는 Workspace
   접근 권한을 확인한 뒤 각 Meeting의 Workspace owner 또는 participant 권한을 다시 검증한다.
 - `reportTitle`이 있으면 정규화 제목 exact 검색을 먼저 수행한다. exact 결과가 한 건이면 해당 report
@@ -1417,9 +1430,12 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
   임계값이고 `0.70`은 단일 후보 자동 확정 임계값이다. fuzzy 후보가 여러 건이거나 단일 후보 점수가
   `0.70` 미만이면 RAG 범위를 고정하지 않고 clarification으로 전환한다. 단일 후보가 `0.70` 이상일
   때만 사용자 확인 없이 해당 report 범위에서 검색한다.
-- exact와 fuzzy 후보가 모두 없으면 같은 tool 호출에서 transcript·Activity 하이브리드 검색으로
-  전환한다. 제목이 없는 내용 질문은 처음부터 이 단계로 진입한다. 날짜 범위는 RAG에 직접 적용하고,
-  `status` 또는 `roomName`이 있으면 권한 있는 report ID 집합으로 검색 범위를 제한한다.
+- exact와 fuzzy 후보가 모두 없으면 기본 `fallback=none`에서는 `not_found`로 종료한다. 사용자가
+  “제목이 없으면 Workspace 전체 회의록에서 찾아줘”처럼 범위 확대를 명시해
+  `fallback=workspace_evidence`가 된 경우에만 transcript·Activity Workspace 검색으로 전환한다.
+  제목이 없는 내용 질문은 처음부터 Workspace evidence 단계로 진입한다. 날짜 범위는 RAG에 직접
+  적용하고, `status`, `roomName`, `latest`가 있으면 공통 후보 검색기가 권한 있는 report ID 집합으로
+  범위를 제한한다.
 - 후보 선택은 제목, 회의 시작 시각, 상태와 bounded 설명을 제공한다. 선택 뒤에는
   `useSelectedMeetingReportCandidate=true` 또는 같은 후보의 opaque `contextRef`로 원래
   `search_meeting_reports`를 재개하고, App Server가 report 접근 권한을 다시 검증한다.
@@ -1432,11 +1448,16 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
   `list_meeting_reports → search_meeting_transcript` chain은 새 tool을 사용할 수 없는 경우에만
   호환 fallback으로 유지한다. 두 경로를 동시에 실행해 검색 결과를 비교하거나 측정하는
   shadow/comparison 로직은 현재 없다.
+- AI Worker는 Router가 선택한 `list`, `summary`, `evidence` capability를 “논의”, “근거”, “내용”
+  같은 단어로 다시 분기하지 않는다. 현재 턴 Scope를 재구성해 stale selector를 제거하고 schema가
+  허용하는 필드만 전달한다. “같은 조건 유지”가 명시된 경우에만 이전 Scope를 이어간다.
 - `search_meeting_transcript`는 기존 호환 경로와 명시적으로 선택된 report의 근거 검색에 남아 있다.
   두 검색 tool 모두 transcript 원문과 raw Activity Log를 Agent run/step에 저장하지 않고, 권한 있는
   namespaced source ID만 grounded-answer 경로에 전달한다. 검색 근거가 된 MeetingReport는
   `/report?reportId=...` 링크를 제공하고, 관련도 임계값을 통과한 Drive 문서는
   `/files?documentId=...` 링크를 제공한다. 링크 resource ref에는 원문이나 excerpt를 저장하지 않는다.
+  Meeting 근거 source에는 bounded `reportTitle`과 ISO `meetingStartedAt`도 포함해 grounded answer와
+  citation UI가 실제 회의 제목·시작 시각을 표시할 수 있게 한다.
 - 두 검색 tool이 사용하는 RAG는 embedding 유사도 후보와 함께 사용자 query에서 추출한 최대 8개의
   bounded literal term을 transcript/Activity의 안전한 chunk 본문에서 조회한다. literal 일치 후보는
   낮은 embedding 점수만으로 탈락시키지 않고 우선 보존하며, 권한 경계와 최신 completed index 조건은

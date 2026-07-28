@@ -13,9 +13,17 @@ import {
 } from "../../meeting/meeting.service";
 import {
   MeetingReportService,
-  type MeetingAgentActionItemSearchPayload,
-  type MeetingReportSummaryPayload
+  type MeetingAgentActionItemSearchPayload
 } from "../../meeting-report/meeting-report.service";
+import {
+  MeetingReportCandidateService,
+  type MeetingReportCandidateSearchResult,
+  type MeetingReportSearchCandidate
+} from "../../meeting-report/meeting-report-candidate.service";
+import {
+  createMeetingReportSearchScope,
+  type MeetingReportSearchScope
+} from "../../meeting-report/meeting-report-search-scope";
 import { WorkspaceService } from "../../workspace/workspace.service";
 import { AgentThreadContextService } from "../agent-thread-context.service";
 import type { AgentToolContext } from "../types/agent-tool.types";
@@ -66,16 +74,6 @@ export interface MeetingAgentMeetingSelector {
   to?: string;
 }
 
-export interface MeetingAgentReportSelector {
-  from?: string;
-  to?: string;
-  status?: "PROCESSING" | "QUEUED" | "TRANSCRIBING" | "SUMMARIZING" | "COMPLETED" | "FAILED";
-  /** Agent-only displayed report-title filter; it is distinct from roomName. */
-  reportTitle?: string;
-  /** Agent-only room-name filter; it is not part of the public Meeting API. */
-  roomName?: string;
-}
-
 export interface MeetingAgentMemberSelector {
   self?: boolean;
   displayName?: string;
@@ -106,6 +104,7 @@ export class MeetingAgentResourceResolver {
     private readonly meetingService: MeetingService,
     private readonly meetingReportService: MeetingReportService,
     private readonly workspaceService: WorkspaceService,
+    private readonly meetingReportCandidateService: MeetingReportCandidateService,
     private readonly threadContextService?: AgentThreadContextService
   ) {}
 
@@ -206,31 +205,36 @@ export class MeetingAgentResourceResolver {
 
   async resolveReport(
     context: AgentToolContext,
-    selector: MeetingAgentReportSelector
+    scope: MeetingReportSearchScope
   ): Promise<MeetingAgentResourceResolution> {
-    const reports = await this.meetingReportService.listReportsForAgent(
+    const result = await this.meetingReportCandidateService.searchScope(
       context.currentUserId,
       context.workspaceId,
-      { ...selector, limit: RESOLUTION_QUERY_LIMIT }
+      scope,
+      {
+        limit:
+          scope.latest === true && !scope.title
+            ? 1
+            : RESOLUTION_QUERY_LIMIT
+      }
     );
-    return this.resolveCandidates(context, reports.reports, (report) => ({
-      reference: { resourceType: "meeting_report", resourceId: report.id },
-      candidate: this.reportCandidate(report)
-    }));
+    return this.resolveReportCandidates(
+      context,
+      result,
+      scope.latest === true && !scope.title
+    );
   }
 
   async resolveLatestReport(
     context: AgentToolContext
   ): Promise<MeetingAgentResourceResolution> {
-    const reports = await this.meetingReportService.listReportsForAgent(
-      context.currentUserId,
-      context.workspaceId,
-      { limit: 1 }
+    return this.resolveReport(
+      context,
+      createMeetingReportSearchScope(
+        { latest: true, limit: 1 },
+        "summary"
+      )
     );
-    return this.resolveCandidates(context, reports.reports, (report) => ({
-      reference: { resourceType: "meeting_report", resourceId: report.id },
-      candidate: this.reportCandidate(report)
-    }));
   }
 
   async resolveMember(
@@ -397,6 +401,35 @@ export class MeetingAgentResourceResolver {
     };
   }
 
+  private resolveReportCandidates(
+    context: AgentToolContext,
+    result: MeetingReportCandidateSearchResult,
+    selectFirst = false
+  ): MeetingAgentResourceResolution {
+    if (result.status === "not_found" || result.reports.length === 0) {
+      return this.notFound();
+    }
+    if (selectFirst || result.status === "resolved") {
+      const resolved = this.reportCandidate(result.reports[0]);
+      return this.selected(context, resolved.reference, resolved.candidate);
+    }
+    return {
+      kind: "needs_clarification",
+      reason: "ambiguous",
+      candidates: result.reports.slice(0, MAX_CANDIDATES).map((report) => {
+        const resolved = this.reportCandidate(report);
+        return {
+          ...resolved.candidate,
+          selectionToken: this.createSelectionToken(
+            context,
+            resolved.reference
+          )
+        };
+      }),
+      totalCandidates: result.totalCount
+    };
+  }
+
   private selected(
     context: AgentToolContext,
     reference: MeetingAgentResourceReference,
@@ -435,14 +468,25 @@ export class MeetingAgentResourceResolver {
   }
 
   private reportCandidate(
-    report: MeetingReportSummaryPayload
-  ): MeetingAgentResourceCandidate {
+    report: MeetingReportSearchCandidate
+  ): {
+    reference: MeetingAgentResourceReference;
+    candidate: MeetingAgentResourceCandidate;
+  } {
     const summary = report.summary?.trim().replace(/\s+/g, " ").slice(0, 180);
     return {
-      resourceType: "meeting_report",
-      label: report.title?.slice(0, 120) || "회의록",
-      description: summary ? `${report.createdAt} · ${summary}` : report.createdAt,
-      status: report.status
+      reference: {
+        resourceType: "meeting_report",
+        resourceId: report.reportId
+      },
+      candidate: {
+        resourceType: "meeting_report",
+        label: report.title?.slice(0, 120) || "회의록",
+        description: summary
+          ? `${report.meetingStartedAt} · ${summary}`
+          : report.meetingStartedAt,
+        status: report.status
+      }
     };
   }
 

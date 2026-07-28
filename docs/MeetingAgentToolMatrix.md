@@ -72,10 +72,10 @@ Meeting API endpoint가 존재하더라도 Agent tool adapter가 없으면 **미
 | 회의방에서 나간다 | `leave_meeting` | “회의에서 나가줘” | 명시적 일반 나가기는 자동 실행. 마지막 참여자면 기존 흐름대로 녹음 종료·회의 종료·회의록 생성이 연쇄될 수 있다 |
 | 회의 녹음을 시작한다 | `start_meeting_recording` | “지금 회의 녹음 시작해줘” | 참여자 동의 재검증과 외부 Egress 시작이 있으므로 확인 후 실행 |
 | 회의 녹음을 끝내고 회의록 생성을 요청한다 | `end_meeting_recording` | “녹음 끝내고 회의록 만들어줘” | 확인 후 실행. Agent는 recording ID를 받거나 추측하지 않고 서버가 current recording을 해소 |
-| 최근·기간·상태·정확한 제목별 회의록 목록을 찾는다 | **현재 구현** `list_meeting_reports` | “최근 회의록 보여줘”, “지난주 실패한 회의록만 보여줘” | 자동 실행. `from`, `to`, `status`, Agent 내부 `reportTitle`, `roomName`, `limit`을 지원한다. `reportTitle`은 exact-first와 구분자 prefix까지만 사용하며 fuzzy·내용 검색은 하지 않는다 |
+| 최근·기간·상태·제목별 회의록 목록을 찾는다 | **현재 구현** `list_meeting_reports` | “최근 회의록 보여줘”, “지난주 실패한 회의록만 보여줘” | 자동 실행. `from`, `to`, `status`, Agent 내부 `reportTitle`, `roomName`, `limit`을 지원한다. 다른 회의록 도구와 같은 후보 검색기에서 exact → pg_trgm fuzzy → 필터·정렬을 적용한다 |
 | 특정 회의록 상세와 생성 상태를 본다 | **현재 구현** `get_meeting_report` | “이 회의록이 왜 실패했어?” | 자동 실행. 제목·기간·상태·회의방 또는 직전 결과의 opaque `contextRef`로 report를 해소하고 status/failed step을 반환한다. raw `reportId`는 planner input으로 받지 않는다 |
 | 요약·논의사항·결정사항·후속 작업 후보만 정리한다 | **현재 구현** `summarize_meeting_report` | “어제 회의 결정사항과 후속 작업만 알려줘” | 자동 실행. selector가 없으면 최신 report를 사용하고, 여러 후보면 선택을 요청한 뒤 summary/discussion/decisions와 `actionItemCandidates`를 bounded projection으로 반환한다 |
-| 제목·회의 날짜·발언·실제 활동 근거로 회의 내용을 검색한다 | **현재 구현** `search_meeting_reports`.<br>호환 fallback: `search_meeting_transcript` | “온보딩 회의에서 왜 다음 주로 미뤘고, 실제로 무엇을 했어?” | `meetings.started_at` 범위에서 exact 제목 → fuzzy 제목 → transcript·Activity 하이브리드 검색을 한 tool에서 수행한다. 동일 제목 다건 또는 신뢰도가 낮은 단일 fuzzy 후보는 먼저 사용자 선택을 요청하고, 해소된 report 권한을 다시 검증한다 |
+| 제목·회의 날짜·발언·실제 활동 근거로 회의 내용을 검색한다 | **현재 구현** `search_meeting_reports`.<br>호환 fallback: `search_meeting_transcript` | “온보딩 회의에서 왜 다음 주로 미뤘고, 실제로 무엇을 했어?” | 공통 후보 검색기에서 `meetings.started_at` 범위, exact 제목, pg_trgm fuzzy 제목, 상태·회의방과 권한을 해소한 뒤 transcript·Activity 하이브리드 검색을 수행한다. 동일 제목 다건 또는 신뢰도가 낮은 단일 fuzzy 후보는 먼저 사용자 선택을 요청한다 |
 | 결정사항을 Activity evidence까지 포함해 검증한다 | `get_meeting_decision_evidence` | “v2 결정의 transcript와 Activity 근거를 함께 보여줘” | 자동. 같은 decision sourceIndex에 직접 연결된 evidence만 반환 |
 | 내 담당 후속 작업을 상태·담당자 기준으로 찾는다 | **현재 구현** `find_action_items` | “내가 맡은 회의 후속 작업이 뭐야?” | 자동 실행. report를 생략하면 Workspace 전체에서 담당자·상태·제목·기간·정렬 selector로 조회 |
 | 후속 작업을 수정·승인·반려한다 | `update_meeting_report_action_item`, `approve_meeting_report_action_item`, `dismiss_meeting_report_action_item` | “2번 할 일을 은재에게 넘기고 승인해줘” | 동일한 직전 결과의 1-based 순번 또는 server-owned reference를 확인 후 재검증해 실행. 승인은 하나의 Calendar 일정 또는 Board issue를 생성하고 관계를 저장한다 |
@@ -84,6 +84,44 @@ Meeting API endpoint가 존재하더라도 Agent tool adapter가 없으면 **미
 | 기존 일정을 수정한다 | **현재 구현** `update_calendar_event` | “금요일 문서 정리 일정을 4시로 미뤄줘” | 확인 후 실행. 제목·명시적 날짜로 후보가 정확히 하나일 때만 실행 |
 | 후속 작업을 이슈로 전환한다 | `approve_meeting_report_action_item`의 `pilo_issue` delivery. Board 선택에는 등록된 Board context tool을 연쇄 사용 | “이 후속 작업을 이슈로 등록해줘” | 확인 후 issue badge 하나를 생성하고 action item relation을 저장한다 |
 | 회의록 생성 상태를 확인하거나 실패한 회의록을 재생성한다 | 상태 조회는 `list_meeting_reports`/`get_meeting_report`, 재생성은 `regenerate_meeting_report`.<br>기존 API: `POST /workspaces/{workspaceId}/meeting-reports/{reportId}/regeneration-jobs` | “회의록 왜 아직 안 나왔어?”, “실패한 회의록을 다시 만들어줘” | 상태 조회는 자동 실행. 재생성은 확인 후 실행 |
+
+`list_meeting_reports`, `get_meeting_report`, `summarize_meeting_report`,
+`search_meeting_reports`는 서로 다른 Agent tool 계약을 유지하지만, 대상 report ID를 정하는 단계는 모두
+`MeetingReportCandidateService`를 사용한다. 이 서비스가 표시 제목 exact·pg_trgm fuzzy, 회의 시작 시각,
+상태·회의방, 사용자 권한과 최신순 ranking을 한 번에 책임진다. 상세·요약 tool은 후보가 여러 개이거나
+신뢰도가 낮은 단일 fuzzy 후보일 때 이 결과 상태를 보존해 사용자 선택을 요청한다.
+
+검색 데이터와 `pg_trgm`은 Supabase가 아니라 운영 RDS PostgreSQL에 저장·실행된다. Agent가 선택한
+tool 종류와 무관하게 App Server는 현재 사용자 턴마다 다음 `MeetingReportSearchScope`를 만들고 동일한
+후보 검색기에 전달한다.
+
+```ts
+{
+  title?: string;
+  from?: string;
+  to?: string;
+  status?: MeetingReportStatus;
+  roomName?: string;
+  intent: "exists" | "list" | "summary" | "evidence";
+  sort: "latest";
+  latest?: true;
+  limit?: number;
+  fallback: "none" | "workspace_evidence";
+}
+```
+
+- 이전 턴의 제목·날짜·상태·회의방·latest·fallback은 사용자가 “같은 조건 유지”를 명시하지 않으면
+  새 턴에 전달하지 않는다. 같은 planner cycle의 후보 선택과 opaque `contextRef`는 원래 검색 목표를
+  이어간다.
+- `exists`는 존재 여부, `list`는 후보 목록, `summary`는 선택된 회의록 projection,
+  `evidence`는 선택된 범위의 RAG만 수행한다.
+- 제목 후보가 0건이어도 기본 `fallback=none`이면 종료한다. 사용자가 Workspace 전체 검색을 명시한
+  `evidence` 요청만 `fallback=workspace_evidence`를 허용한다.
+- `latest=true`는 날짜·상태·회의방 필터를 적용한 뒤 `meetings.started_at` 기준 최신 1건을 뜻한다.
+- 자연어의 “논의”, “근거”, “내용” 같은 단어로 이미 선택된 tool을 강제 교체하지 않는다. Router가
+  intent를 선택하고, 이후 정규화기는 현재 턴 Scope만 검증·보정한다.
+- grounded source에는 citation 근거와 함께 `reportTitle`, `meetingStartedAt`을 전달해 답변이 어떤
+  회의에 근거했는지 표시한다.
 
 ## 현재 등록된 Meeting tool 확정 목록
 
@@ -96,7 +134,7 @@ Meeting API endpoint가 존재하더라도 Agent tool adapter가 없으면 **미
 - `start_meeting_recording`: active Meeting 녹음을 확인 후 시작한다.
 - `end_meeting_recording`: current recording을 확인 후 종료하고 회의록 생성을 요청한다.
 - `list_meeting_reports`: Workspace 회의록 목록을 `from`, `to`, `status`, Agent 내부 `reportTitle`,
-  `roomName`, `limit`으로 조회한다.
+  `roomName`, `limit`으로 조회한다. exact·fuzzy·필터·정렬은 공통 후보 검색기를 사용한다.
 - `get_meeting_report`: MeetingReport selector나 server-owned `contextRef`로 해소한 report의 상세와
   상태를 조회한다.
 - `summarize_meeting_report`: 한 회의록의 요약·논의·결정·후속 작업 후보를 Agent용으로 축약한다.
