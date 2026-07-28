@@ -34,6 +34,10 @@ export function reduceSqlErdSourceMutationIntent(
         pendingMutation: null
       };
     case "control_engagement_changed":
+      if (state.pendingMutation) {
+        return state;
+      }
+
       return {
         ...state,
         controlEngaged: action.engaged

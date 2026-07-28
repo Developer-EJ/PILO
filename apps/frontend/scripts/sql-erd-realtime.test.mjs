@@ -742,6 +742,23 @@ assert.equal(
       { type: "undo" },
       "a second mutation request cannot replace the action waiting for the lock"
     );
+    const reengagedPendingIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        pendingUndoIntent,
+        { engaged: true, type: "control_engagement_changed" }
+      );
+    const consumedReengagedIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        reengagedPendingIntent,
+        { type: "consume" }
+      );
+    assert.equal(
+      sourceMutationIntent.shouldHoldSqlErdSourceMutationIntent(
+        consumedReengagedIntent
+      ),
+      false,
+      "a disabled pending control cannot leave engagement holding the lock after consume"
+    );
     assert.equal(
       sourceLock.shouldHoldSqlErdSourceLock({
         enabled: true,
