@@ -16,6 +16,11 @@ export type PageCursorMembershipSocket = {
   disconnect: (close?: boolean) => unknown;
   id: string;
   leave: (roomName: string) => Promise<unknown> | unknown;
+  local: {
+    to: (roomName: string) => {
+      emit: (event: string, payload: unknown) => unknown;
+    };
+  };
   rooms: ReadonlySet<string>;
   to: (roomName: string) => {
     emit: (event: string, payload: unknown) => unknown;
@@ -77,7 +82,7 @@ export function createPageCursorMembershipRevocationHandler({
                 continue;
               }
               try {
-                socket.to(roomName).emit(pageCursorServerEvents.leave, {
+                socket.local.to(roomName).emit(pageCursorServerEvents.leave, {
                   ...(presence.boardId ? { boardId: presence.boardId } : {}),
                   page: presence.page,
                   userId: presence.userId,

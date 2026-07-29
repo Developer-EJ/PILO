@@ -172,13 +172,15 @@ async function cleanupClassicCanvasRoom({
   roomCheckpointService.unregisterRoomParticipant(room, socket.id);
 
   if (leavePayload) {
-    io.to(roomName).emit(canvasServerEvents.presenceLeave, leavePayload);
+    io.local
+      .to(roomName)
+      .emit(canvasServerEvents.presenceLeave, leavePayload);
   }
   if (lockReleasePayload) {
     emitLockReleases(lockReleasePayload);
   }
   if (previewClearPayload) {
-    io.to(roomName).emit(
+    io.local.to(roomName).emit(
       canvasServerEvents.shapePreviewClear,
       previewClearPayload,
     );
