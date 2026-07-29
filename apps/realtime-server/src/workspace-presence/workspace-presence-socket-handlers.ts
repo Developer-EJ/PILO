@@ -35,7 +35,7 @@ export function createWorkspacePresenceRoomName(workspaceId: string) {
 }
 
 export function emitWorkspacePresenceClearResult(
-  io: Server,
+  io: Pick<Server, "to">,
   result: WorkspacePresenceClearResult,
 ) {
   if (result.kind === "update") {

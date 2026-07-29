@@ -43,6 +43,7 @@ function createSocket({ id, userId, rooms = [], leaveFails = false, roomEmitFail
   const emitted = [];
   const leaveCalls = [];
   const disconnectCalls = [];
+  const clusterRoomEvents = [];
   const roomEvents = [];
   const socket = {
     data: { auth: { displayName: "Target", userId }, pageCursorPresenceByRoom: {} },
@@ -63,16 +64,32 @@ function createSocket({ id, userId, rooms = [], leaveFails = false, roomEmitFail
     },
     on() {},
     rooms: new Set([id, ...rooms]),
+    local: {
+      to(roomName) {
+        return {
+          emit(eventName, payload) {
+            if (roomEmitFails) throw new Error("emit failed");
+            roomEvents.push({ event: eventName, payload, roomName });
+          },
+        };
+      },
+    },
     to(roomName) {
       return {
         emit(eventName, payload) {
-          if (roomEmitFails) throw new Error("emit failed");
-          roomEvents.push({ event: eventName, payload, roomName });
+          clusterRoomEvents.push({ event: eventName, payload, roomName });
         },
       };
     },
   };
-  return { disconnectCalls, emitted, leaveCalls, roomEvents, socket };
+  return {
+    clusterRoomEvents,
+    disconnectCalls,
+    emitted,
+    leaveCalls,
+    roomEvents,
+    socket,
+  };
 }
 
 test("revocation removes only the target user's target workspace cursor rooms and presence", async () => {
@@ -121,6 +138,7 @@ test("revocation removes only the target user's target workspace cursor rooms an
       roomName: targetHome,
     },
   ]);
+  assert.deepEqual(target.clusterRoomEvents, []);
 });
 
 test("invalid revocation is rejected without mutation and leave failure disconnects fail-closed", async () => {

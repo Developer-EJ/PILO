@@ -59,6 +59,7 @@ test("evicts only revoked Workspace PDF rooms and clears their presence", async 
   const secondTab = createSocket("pdf-tab-2", userId);
   const otherWorkspaceTab = createSocket("pdf-tab-3", userId);
   const otherUserTab = createSocket("pdf-tab-4", otherUserId);
+  const clusterEmitted = [];
   const emitted = [];
 
   for (const [socket, room, displayName] of [
@@ -78,6 +79,15 @@ test("evicts only revoked Workspace PDF rooms and clears their presence", async 
 
   const handler = createPdfCollaborationMembershipRevocationHandler({
     io: {
+      local: {
+        to(roomName) {
+          return {
+            emit(event, payload) {
+              emitted.push({ event, payload, roomName });
+            },
+          };
+        },
+      },
       sockets: {
         sockets: new Map([
           [firstTab.id, firstTab],
@@ -89,7 +99,7 @@ test("evicts only revoked Workspace PDF rooms and clears their presence", async 
       to(roomName) {
         return {
           emit(event, payload) {
-            emitted.push({ event, payload, roomName });
+            clusterEmitted.push({ event, payload, roomName });
           },
         };
       },
@@ -107,6 +117,7 @@ test("evicts only revoked Workspace PDF rooms and clears their presence", async 
   assert.equal(state.getSnapshot(firstRoom)?.presence.length, 1);
   assert.equal(state.getSnapshot(secondRoom), null);
   assert.equal(state.getSnapshot(otherWorkspaceRoom)?.presence.length, 1);
+  assert.deepEqual(clusterEmitted, []);
   assert.deepEqual(
     emitted.map(({ event, roomName }) => ({ event, roomName })),
     [

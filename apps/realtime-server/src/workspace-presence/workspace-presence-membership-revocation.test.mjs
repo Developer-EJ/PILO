@@ -52,12 +52,22 @@ function createSocket(
 }
 
 function createLocalIo(roomSockets, { discoveryError = null } = {}) {
+  const clusterRoomEvents = [];
   const roomEvents = [];
   const io = {
+    local: {
+      to(roomName) {
+        return {
+          emit(event, payload) {
+            roomEvents.push({ event, payload, roomName });
+          },
+        };
+      },
+    },
     to(roomName) {
       return {
         emit(event, payload) {
-          roomEvents.push({ event, payload, roomName });
+          clusterRoomEvents.push({ event, payload, roomName });
         },
       };
     },
@@ -78,7 +88,7 @@ function createLocalIo(roomSockets, { discoveryError = null } = {}) {
       };
     },
   });
-  return { io, roomEvents };
+  return { clusterRoomEvents, io, roomEvents };
 }
 
 test("membership.revoked는 target presence state와 room만 정리한다", async () => {
@@ -92,7 +102,7 @@ test("membership.revoked는 target presence state와 room만 정리한다", asyn
     { displayName: "동료", userId: otherUserId },
     workspaceId,
   );
-  const { io, roomEvents } = createLocalIo([target]);
+  const { clusterRoomEvents, io, roomEvents } = createLocalIo([target]);
   const handler = createWorkspacePresenceMembershipRevocationHandler({ io, service });
 
   assert.equal(await handler.handle(validEvent), true);
@@ -110,6 +120,7 @@ test("membership.revoked는 target presence state와 room만 정리한다", asyn
     payload: { userId, workspaceId },
     roomName: createWorkspacePresenceRoomName(workspaceId),
   });
+  assert.deepEqual(clusterRoomEvents, []);
   assert.equal(
     service.updateSocket(target.id, {
       focused: true,
@@ -126,7 +137,7 @@ test("presence room leave 실패도 state를 clear하고 disconnect로 fail clos
   const target = createSocket(userId, { failLeaveRoom: roomName });
   const service = createWorkspacePresenceService();
   service.joinSocket(target.id, { displayName: "진호", userId }, workspaceId);
-  const { io, roomEvents } = createLocalIo([target]);
+  const { clusterRoomEvents, io, roomEvents } = createLocalIo([target]);
   const handler = createWorkspacePresenceMembershipRevocationHandler({ io, service });
 
   assert.equal(await handler.handle(validEvent), true);
@@ -137,6 +148,7 @@ test("presence room leave 실패도 state를 clear하고 disconnect로 fail clos
     payload: { userId, workspaceId },
     roomName,
   });
+  assert.deepEqual(clusterRoomEvents, []);
 });
 
 test("presence room의 다른 사용자는 유지하고 registry 오류는 fail closed 처리한다", async () => {
