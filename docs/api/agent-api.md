@@ -135,9 +135,21 @@ AI Worker는 매 사용자 턴의 제목·날짜·상태·회의방·intent·lat
 `MeetingReportSearchScope`로 다시 만든다. 사용자가 같은 조건 유지를 명시하지 않으면 이전 턴 selector를
 제거하고, 모든 MeetingReport tool은 이 Scope를 App Server의 공통 후보 검색기에 전달한다. Router가
 선택한 list/summary/evidence tool은 자연어의 특정 단어를 근거로 정규화 단계에서 강제 교체하지 않는다.
+제목은 명시적으로 표시한 제목, 현재 턴 원문에 존재하는 Planner `reportTitle`, 제한적인 자연어 제목
+fallback 순으로 선택한다. 선택된 제목의 원문 구간은 날짜 파싱에서 제외하므로 “토요일 데일리스크럼”의
+요일을 날짜 조건으로 재해석하지 않는다. 반대로 “2026년 7월 17일에 시작한 회의”처럼 제목이 아닌
+날짜 설명은 `reportTitle`로 확정하지 않고 `[from, to)` 범위로 변환한다. “이번주 토요일”과
+“지난주 토요일”은 해당 주의 하루 범위로 변환한다.
 `fallback` 기본값은 `none`이며, 제목 0건 뒤 Workspace 전체 근거 검색은 사용자가 명시적으로 허용한
 `evidence` 요청에서만 `workspace_evidence`로 실행한다. fallback에서도 제목만 제거하며 날짜·상태·
 회의방·latest·limit은 유지한다. 날짜와 개수는 독립 슬롯으로 추출해 함께 전달한다.
+
+MeetingReport planner step의 `outputSummary.meetingReportScopeTrace`는 원본 Planner 입력과
+정규화 결과의 status, tool 이름, 추가·제거·교체·보존된 필드 이름만 기록한다. selector 값, provider
+원문, transcript나 secret은 이 진단 metadata에 저장하지 않는다. 변경 필드에는 제목 검증, 날짜 해소,
+fallback 정책처럼 고정된 reason code를 함께 기록한다. 이 필드는 기존 `agent-tools:v9`
+입력 계약을 변경하지 않는 additive output metadata이므로 Tool schema version이나 DB migration을
+요구하지 않는다.
 
 `delegate_canvas_agent`가 실행되면 일반 Agent run은 `running`을 유지하고 Canvas Agent child run의
 terminal 상태를 기다린다. App Server는 사용자의 최신 원문 prompt를 수정하거나 요약하지 않고 child run에
@@ -1454,6 +1466,13 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
 - AI Worker는 Router가 선택한 `list`, `summary`, `evidence` capability를 “논의”, “근거”, “내용”
   같은 단어로 다시 분기하지 않는다. 현재 턴 Scope를 재구성해 stale selector를 제거하고 schema가
   허용하는 필드만 전달한다. “같은 조건 유지”가 명시된 경우에만 이전 Scope를 이어간다.
+- 제목 selector는 명시적으로 표시한 제목, 현재 턴에 실제로 포함된 Planner `reportTitle`, 제한적인
+  자연어 fallback 순으로 정한다. 확정된 제목 문자열은 날짜 파서에서 제외하고, 날짜 설명이나
+  “이전 조건은 취소” 같은 제어 문구를 제목으로 승격하지 않는다. “이번주 토요일”과 “지난주 토요일”은
+  해당 주의 토요일 하루 범위로 계산한다.
+- planner step의 `outputSummary.meetingReportScopeTrace`는 원본과 정규화 결과 사이에서
+  보존·추가·제거·교체된 필드 이름과 고정 reason code만 기록한다. 실제 selector 값이나 provider
+  원문은 기록하지 않는다.
 - `search_meeting_transcript`는 기존 호환 경로와 명시적으로 선택된 report의 근거 검색에 남아 있다.
   두 검색 tool 모두 transcript 원문과 raw Activity Log를 Agent run/step에 저장하지 않고, 권한 있는
   namespaced source ID만 grounded-answer 경로에 전달한다. 검색 근거가 된 MeetingReport는
