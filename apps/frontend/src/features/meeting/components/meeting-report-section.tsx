@@ -2225,7 +2225,7 @@ export function MeetingReportSection({
   const handleRealtimeReportUpdated = useCallback(
     (event: MeetingReportRealtimeEvent) => {
       void realtimeReportRefreshCoalescerRef.current.run(
-        event.reportId,
+        event,
         async () => {
           const refreshes: Promise<unknown>[] = [reloadReports()];
           if (selectedReportId === event.reportId) {

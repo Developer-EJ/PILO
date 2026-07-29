@@ -474,7 +474,7 @@ assert.match(meetingReportSection, /REPORT_POLL_INTERVAL_MS = 10000/);
 assert.match(meetingReportSection, /createMeetingReportRefreshCoalescer/);
 assert.match(
   meetingReportSection,
-  /realtimeReportRefreshCoalescerRef\.current\.run/
+  /realtimeReportRefreshCoalescerRef\.current\.run\(\s*event,/
 );
 assert.match(meetingReportSection, /useMeetingReportRealtime/);
 assert.match(meetingReportSection, /selectedReportId === event\.reportId/);
