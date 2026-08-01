@@ -61,8 +61,20 @@ class FakeActivityLogService {
   }
 }
 
+class FakeDocumentConflictObserver {
+  constructor({ throwOnObserve = false } = {}) {
+    this.calls = [];
+    this.throwOnObserve = throwOnObserve;
+  }
+  observe(input) {
+    this.calls.push(input);
+    if (this.throwOnObserve) throw new Error("observer unavailable");
+  }
+}
+
 const workspaceService = new FakeWorkspaceService();
 const activityLogService = new FakeActivityLogService();
+const successfulConflictObserver = new FakeDocumentConflictObserver();
 const database = new FakeDatabase([
   documentBootstrapRow(),
   lockedDocumentRow(),
@@ -73,7 +85,7 @@ const database = new FakeDatabase([
 const service = new DocumentService(database, workspaceService, activityLogService, {
   createDocumentId: () => documentId,
   createSnapshotId: () => nextSnapshotId
-});
+}, undefined, successfulConflictObserver);
 
 const bootstrap = await service.getDocument(currentUserId, workspaceId, documentId);
 
@@ -121,24 +133,65 @@ assert.equal(
 );
 assert.equal(Object.hasOwn(activityLogService.calls[0].input.metadata.data, "contentJson"), false);
 assert.equal(Object.hasOwn(activityLogService.calls[0].input.metadata.data, "yjsState"), false);
+assert.equal(successfulConflictObserver.calls.length, 0);
 
 const staleDatabase = new FakeDatabase([lockedDocumentRow({ currentVersion: 1 })]);
+const staleConflictObserver = new FakeDocumentConflictObserver();
 const staleService = new DocumentService(
   staleDatabase,
   new FakeWorkspaceService(),
   new FakeActivityLogService(),
-  { createDocumentId: () => documentId, createSnapshotId: () => nextSnapshotId }
+  { createDocumentId: () => documentId, createSnapshotId: () => nextSnapshotId },
+  undefined,
+  staleConflictObserver
 );
 
-await assert.rejects(
-  () =>
-    staleService.saveDocumentSnapshot(currentUserId, workspaceId, documentId, {
-      expectedVersion: 0,
-      yjsState: "AQID",
-      contentJson: { type: "doc", content: [] }
-    }),
-  (error) => error?.getStatus?.() === 409
+const staleError = await staleService
+  .saveDocumentSnapshot(currentUserId, workspaceId, documentId, {
+    expectedVersion: 0,
+    yjsState: "AQID",
+    contentJson: { type: "doc", content: [] }
+  })
+  .then(
+    () => null,
+    (error) => error
+  );
+assert.equal(staleError?.getStatus?.(), 409);
+assert.equal(
+  staleError?.getResponse?.()?.error?.message,
+  "Document version is outdated"
 );
+assert.deepEqual(staleConflictObserver.calls, [
+  { documentId, expectedVersion: 0, currentVersion: 1 }
+]);
+
+const throwingConflictObserver = new FakeDocumentConflictObserver({ throwOnObserve: true });
+const observerFailureService = new DocumentService(
+  new FakeDatabase([lockedDocumentRow({ currentVersion: 2 })]),
+  new FakeWorkspaceService(),
+  new FakeActivityLogService(),
+  { createDocumentId: () => documentId, createSnapshotId: () => nextSnapshotId },
+  undefined,
+  throwingConflictObserver
+);
+const observerFailureError = await observerFailureService
+  .saveDocumentSnapshot(currentUserId, workspaceId, documentId, {
+    expectedVersion: 1,
+    yjsState: "AQID",
+    contentJson: { type: "doc", content: [] }
+  })
+  .then(
+    () => null,
+    (error) => error
+  );
+assert.equal(observerFailureError?.getStatus?.(), 409);
+assert.equal(
+  observerFailureError?.getResponse?.()?.error?.message,
+  "Document version is outdated"
+);
+assert.deepEqual(throwingConflictObserver.calls, [
+  { documentId, expectedVersion: 1, currentVersion: 2 }
+]);
 
 assert.throws(
   () =>

@@ -26,6 +26,7 @@ import type {
   SaveDocumentSnapshotRequest
 } from "./document.types";
 import type { DriveItemRow } from "./drive.types";
+import { DocumentConflictObserver } from "./document-conflict-observer";
 import { DocumentEmbeddingService } from "./document-embedding.service";
 import {
   validateCreateDocumentRequest,
@@ -49,6 +50,7 @@ const defaultDocumentIdFactory: DocumentIdFactory = {
   createDocumentId: randomUUID,
   createSnapshotId: randomUUID
 };
+const defaultDocumentConflictObserver = new DocumentConflictObserver();
 
 @Injectable()
 export class DocumentService {
@@ -57,7 +59,10 @@ export class DocumentService {
     private readonly workspaceService: WorkspaceService,
     private readonly activityLogService: ActivityLogService,
     @Optional() private readonly idFactory: DocumentIdFactory = defaultDocumentIdFactory,
-    @Optional() private readonly documentEmbeddingService?: DocumentEmbeddingService
+    @Optional() private readonly documentEmbeddingService?: DocumentEmbeddingService,
+    @Optional()
+    private readonly documentConflictObserver: DocumentConflictObserver =
+      defaultDocumentConflictObserver
   ) {}
 
   async createDocument(
@@ -277,6 +282,15 @@ export class DocumentService {
 
       const currentVersion = Number(lockedDocument.current_version);
       if (currentVersion !== input.expectedVersion) {
+        try {
+          this.documentConflictObserver.observe({
+            documentId,
+            expectedVersion: input.expectedVersion,
+            currentVersion
+          });
+        } catch {
+          // Observability must not change the existing conflict response.
+        }
         throw conflict("Document version is outdated");
       }
 
