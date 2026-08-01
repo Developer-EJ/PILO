@@ -98,6 +98,7 @@ def test_snapshot_scope_can_run_agent_workflow_and_publish_summary() -> None:
         in workflow
     )
     assert '--meeting-variant "$EVALUATION_VARIANT"' in workflow
+    assert '--report-variant "$VARIANT"' in workflow
     assert '--workflow-catalog "$RUNNER_TEMP/prepared/agent-workflow-catalog.json"' in workflow
     assert "agent-evaluation-target-${{ needs.prepare.outputs.snapshot_scope }}" in workflow
     assert "target-meeting-${SNAPSHOT_SCOPE}-evaluation.json" in workflow

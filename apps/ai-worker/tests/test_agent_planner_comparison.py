@@ -7,6 +7,7 @@ from app.agent_planner_comparison import (
     build_multiturn_context_comparison,
     build_multiturn_context_snapshot,
     build_two_stage_comparison,
+    reported_suite_version,
 )
 from scripts.snapshot_agent_planner_evaluations import (
     main as snapshot_main,
@@ -150,6 +151,16 @@ def workflow_report(
             "safetyViolations": [],
         }
     return value
+
+
+def test_reported_suite_version_uses_the_public_agent_workflow_scope() -> None:
+    assert (
+        reported_suite_version(
+            "meeting-agent-regression:v1:multi_tool",
+            "agent_workflow",
+        )
+        == "meeting-agent-regression:v1:agent_workflow"
+    )
 
 
 def multiturn_report(*, evaluator_sha: str = "1" * 64) -> dict[str, object]:

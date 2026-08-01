@@ -309,6 +309,7 @@ jobs:
             --suite "$RUNNER_TEMP/prepared/$TARGET-phase4e-evaluation-tools.json"
             --meeting-catalog "$RUNNER_TEMP/prepared/meeting-agent-capability-catalog.json"
             --meeting-variant "$EVALUATION_VARIANT"
+            --report-variant "$VARIANT"
             --tool-capability-catalog "$RUNNER_TEMP/prepared/$TARGET-phase4e-tool-capability-catalog.json"
             --registry-snapshot "$RUNNER_TEMP/prepared/$TARGET-agent-tool-registry-snapshot.json"
             --llm-routing
