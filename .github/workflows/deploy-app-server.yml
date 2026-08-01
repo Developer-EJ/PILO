@@ -20,6 +20,7 @@ env:
   ECR_REPOSITORY: pilo-app-server
   APP_PATH: apps/app-server
   CONTAINER_NAME: app-server
+  WORKER_CONTAINER_NAME: github-sync-worker
 
 jobs:
   deploy:
@@ -116,6 +117,71 @@ jobs:
             echo "log_group=$log_group"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Capture optional worker rollback state
+        id: previous-worker
+        env:
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_GITHUB_SYNC_WORKER_SERVICE: ${{ vars.ECS_GITHUB_SYNC_WORKER_SERVICE }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ECS_GITHUB_SYNC_WORKER_SERVICE:-}" ]]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          worker_service_json=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_GITHUB_SYNC_WORKER_SERVICE")
+          worker_service_name=$(jq -r '.services[0].serviceName // empty' \
+            <<< "$worker_service_json")
+          if [[ "$worker_service_name" != "$ECS_GITHUB_SYNC_WORKER_SERVICE" ]]; then
+            echo "GitHub sync worker service does not exist yet; skipping."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          jq -e '
+            (.failures | length) == 0
+            and .services[0].desiredCount >= 1
+          ' <<< "$worker_service_json" > /dev/null
+          previous_worker_task_definition=$(jq -er \
+            '.services[0].taskDefinition' <<< "$worker_service_json")
+          previous_worker_desired_count=$(jq -er \
+            '.services[0].desiredCount' <<< "$worker_service_json")
+          worker_task_arn=$(aws ecs list-tasks \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --service-name "$ECS_GITHUB_SYNC_WORKER_SERVICE" \
+            --desired-status RUNNING \
+            --query 'taskArns[0]' \
+            --output text)
+          test -n "$worker_task_arn"
+          test "$worker_task_arn" != "None"
+
+          worker_task_json=$(aws ecs describe-tasks \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --tasks "$worker_task_arn")
+          previous_worker_image_digest=$(jq -er \
+            --arg container "$WORKER_CONTAINER_NAME" '
+              .tasks[0].containers[]
+              | select(.name == $container)
+              | .imageDigest
+            ' <<< "$worker_task_json")
+
+          aws ecs describe-task-definition \
+            --task-definition "$previous_worker_task_definition" \
+            --query taskDefinition > previous-worker-task-definition.json
+          jq -e \
+            --arg container "$WORKER_CONTAINER_NAME" '
+              any(.containerDefinitions[]; .name == $container)
+            ' previous-worker-task-definition.json > /dev/null
+
+          {
+            echo "exists=true"
+            echo "task_definition=$previous_worker_task_definition"
+            echo "desired_count=$previous_worker_desired_count"
+            echo "image_uri=${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}@${previous_worker_image_digest}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push image
         id: build
         uses: docker/build-push-action@v6
@@ -188,6 +254,46 @@ jobs:
           test -n "$new_task_definition"
           echo "arn=$new_task_definition" >> "$GITHUB_OUTPUT"
 
+      - name: Register optional worker task definition
+        if: ${{ steps.previous-worker.outputs.exists == 'true' }}
+        id: worker-task-definition
+        env:
+          IMAGE_URI: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          jq \
+            --arg container "$WORKER_CONTAINER_NAME" \
+            --arg image "$IMAGE_URI" '
+              .containerDefinitions |= map(
+                if .name == $container then .image = $image else . end
+              )
+              | del(
+                  .taskDefinitionArn,
+                  .revision,
+                  .status,
+                  .requiresAttributes,
+                  .compatibilities,
+                  .registeredAt,
+                  .registeredBy
+                )
+            ' previous-worker-task-definition.json > next-worker-task-definition.json
+
+          jq -e \
+            --arg container "$WORKER_CONTAINER_NAME" \
+            --arg image "$IMAGE_URI" '
+              [
+                .containerDefinitions[]
+                | select(.name == $container and .image == $image)
+              ] | length == 1
+            ' next-worker-task-definition.json > /dev/null
+
+          new_worker_task_definition=$(aws ecs register-task-definition \
+            --cli-input-json file://next-worker-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          test -n "$new_worker_task_definition"
+          echo "arn=$new_worker_task_definition" >> "$GITHUB_OUTPUT"
+
       - name: Deploy one-task canary
         id: deploy-canary
         env:
@@ -226,6 +332,33 @@ jobs:
               and .services[0].pendingCount == 0
             ' <<< "$service_json" > /dev/null
 
+          readarray -t task_arns < <(aws ecs list-tasks \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --service-name "$ECS_APP_SERVER_SERVICE" \
+            --desired-status RUNNING \
+            --query 'taskArns[]' \
+            --output text | tr '\t' '\n')
+          test "${#task_arns[@]}" -ge 1
+          task_json=$(aws ecs describe-tasks \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --tasks "${task_arns[@]}")
+          canary_task_arn=$(jq -er \
+            --arg task_definition "${{ steps.task-definition.outputs.arn }}" '
+              [
+                .tasks[]
+                | select(
+                    .taskDefinitionArn == $task_definition
+                    and .lastStatus == "RUNNING"
+                  )
+                | .taskArn
+              ]
+              | if length == 1 then .[0]
+                else error("expected exactly one running canary task")
+                end
+            ' <<< "$task_json")
+          canary_task_id="${canary_task_arn##*/}"
+          expected_log_stream="app-server/${CONTAINER_NAME}/${canary_task_id}"
+
           test -n "$APP_SERVER_URL"
           curl --fail --silent --show-error \
             --retry 5 --retry-all-errors \
@@ -235,14 +368,13 @@ jobs:
           for _ in {1..12}; do
             log_streams=$(aws logs describe-log-streams \
               --log-group-name "$APP_SERVER_LOG_GROUP" \
-              --order-by LastEventTime \
-              --descending \
-              --limit 50)
+              --log-stream-name-prefix "$expected_log_stream")
             if jq -e \
+              --arg expected_stream "$expected_log_stream" \
               --argjson started "$CANARY_STARTED_MS" '
                 any(
                   .logStreams[]?;
-                  (.logStreamName | startswith("app-server/"))
+                  .logStreamName == $expected_stream
                   and (.lastEventTimestamp // 0) >= $started
                 )
               ' <<< "$log_streams" > /dev/null; then
@@ -271,44 +403,116 @@ jobs:
             --services "$ECS_APP_SERVER_SERVICE"
 
       - name: Deploy optional GitHub sync worker
+        if: ${{ steps.previous-worker.outputs.exists == 'true' }}
         id: deploy-worker
         env:
           ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
           ECS_GITHUB_SYNC_WORKER_SERVICE: ${{ vars.ECS_GITHUB_SYNC_WORKER_SERVICE }}
         run: |
           set -euo pipefail
-          if [[ -z "${ECS_GITHUB_SYNC_WORKER_SERVICE:-}" ]]; then
-            echo "GitHub sync worker is not configured; skipping."
-            exit 0
-          fi
-
-          worker_service_name=$(aws ecs describe-services \
-            --cluster "$ECS_CLUSTER_NAME" \
-            --services "$ECS_GITHUB_SYNC_WORKER_SERVICE" \
-            --query 'services[0].serviceName' \
-            --output text)
-          if [[ "$worker_service_name" != "$ECS_GITHUB_SYNC_WORKER_SERVICE" ]]; then
-            echo "GitHub sync worker service does not exist yet; skipping."
-            exit 0
-          fi
-
           aws ecs update-service \
             --cluster "$ECS_CLUSTER_NAME" \
             --service "$ECS_GITHUB_SYNC_WORKER_SERVICE" \
+            --task-definition "${{ steps.worker-task-definition.outputs.arn }}" \
+            --desired-count 1 \
             --force-new-deployment
           aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER_NAME" \
             --services "$ECS_GITHUB_SYNC_WORKER_SERVICE"
 
-      - name: Roll back failed canary
-        if: ${{ failure() && (steps.deploy-canary.outcome == 'success' || steps.deploy-canary.outcome == 'failure') && steps.deploy-worker.outcome != 'failure' }}
+      - name: Verify optional worker task
+        if: ${{ steps.previous-worker.outputs.exists == 'true' }}
+        env:
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_GITHUB_SYNC_WORKER_SERVICE: ${{ vars.ECS_GITHUB_SYNC_WORKER_SERVICE }}
+        run: |
+          set -euo pipefail
+          worker_service_json=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_GITHUB_SYNC_WORKER_SERVICE")
+          jq -e \
+            --arg task_definition "${{ steps.worker-task-definition.outputs.arn }}" '
+              .services[0].taskDefinition == $task_definition
+              and .services[0].desiredCount == 1
+              and .services[0].runningCount == 1
+              and .services[0].pendingCount == 0
+            ' <<< "$worker_service_json" > /dev/null
+
+      - name: Restore optional worker task count
+        if: ${{ steps.previous-worker.outputs.exists == 'true' }}
+        env:
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_GITHUB_SYNC_WORKER_SERVICE: ${{ vars.ECS_GITHUB_SYNC_WORKER_SERVICE }}
+          TARGET_COUNT: ${{ steps.previous-worker.outputs.desired_count }}
+        run: |
+          set -euo pipefail
+          test "$TARGET_COUNT" -ge 1
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --service "$ECS_GITHUB_SYNC_WORKER_SERVICE" \
+            --task-definition "${{ steps.worker-task-definition.outputs.arn }}" \
+            --desired-count "$TARGET_COUNT"
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_GITHUB_SYNC_WORKER_SERVICE"
+
+      - name: Roll back failed deployment
+        if: ${{ failure() && (steps.deploy-canary.outcome == 'success' || steps.deploy-canary.outcome == 'failure') }}
         env:
           ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
           ECS_APP_SERVER_SERVICE: ${{ vars.ECS_APP_SERVER_SERVICE }}
+          ECS_GITHUB_SYNC_WORKER_SERVICE: ${{ vars.ECS_GITHUB_SYNC_WORKER_SERVICE }}
           PREVIOUS_IMAGE_URI: ${{ steps.previous.outputs.image_uri }}
+          PREVIOUS_WORKER_IMAGE_URI: ${{ steps.previous-worker.outputs.image_uri }}
           ROLLBACK_DESIRED_COUNT: ${{ steps.previous.outputs.desired_count }}
+          ROLLBACK_WORKER_DESIRED_COUNT: ${{ steps.previous-worker.outputs.desired_count }}
+          ROLLBACK_WORKER: ${{ steps.previous-worker.outputs.exists == 'true' && (steps.deploy-worker.outcome == 'success' || steps.deploy-worker.outcome == 'failure') }}
         run: |
           set -euo pipefail
+          if [[ "$ROLLBACK_WORKER" == "true" ]]; then
+            jq \
+              --arg container "$WORKER_CONTAINER_NAME" \
+              --arg image "$PREVIOUS_WORKER_IMAGE_URI" '
+                .containerDefinitions |= map(
+                  if .name == $container then .image = $image else . end
+                )
+                | del(
+                    .taskDefinitionArn,
+                    .revision,
+                    .status,
+                    .requiresAttributes,
+                    .compatibilities,
+                    .registeredAt,
+                    .registeredBy
+                  )
+              ' previous-worker-task-definition.json > rollback-worker-task-definition.json
+
+            rollback_worker_task_definition=$(aws ecs register-task-definition \
+              --cli-input-json file://rollback-worker-task-definition.json \
+              --query 'taskDefinition.taskDefinitionArn' \
+              --output text)
+            aws ecs update-service \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --service "$ECS_GITHUB_SYNC_WORKER_SERVICE" \
+              --task-definition "$rollback_worker_task_definition" \
+              --desired-count 1 \
+              --force-new-deployment
+            aws ecs wait services-stable \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$ECS_GITHUB_SYNC_WORKER_SERVICE"
+
+            if [[ "$ROLLBACK_WORKER_DESIRED_COUNT" -gt 1 ]]; then
+              aws ecs update-service \
+                --cluster "$ECS_CLUSTER_NAME" \
+                --service "$ECS_GITHUB_SYNC_WORKER_SERVICE" \
+                --task-definition "$rollback_worker_task_definition" \
+                --desired-count "$ROLLBACK_WORKER_DESIRED_COUNT"
+              aws ecs wait services-stable \
+                --cluster "$ECS_CLUSTER_NAME" \
+                --services "$ECS_GITHUB_SYNC_WORKER_SERVICE"
+            fi
+          fi
+
           jq \
             --arg container "$CONTAINER_NAME" \
             --arg image "$PREVIOUS_IMAGE_URI" '

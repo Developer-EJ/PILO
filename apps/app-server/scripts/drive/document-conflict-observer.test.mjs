@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const {
@@ -81,6 +83,32 @@ const throwingObserver = new DocumentConflictObserver({
 });
 assert.doesNotThrow(() =>
   throwingObserver.observe({ documentId, expectedVersion: 3, currentVersion: 4 })
+);
+
+const defaultSinkResult = spawnSync(
+  process.execPath,
+  [
+    "-e",
+    `const { DocumentConflictObserver } = require(${JSON.stringify(
+      fileURLToPath(
+        new URL(
+          "../../dist/modules/drive/document-conflict-observer.js",
+          import.meta.url
+        )
+      )
+    )}); new DocumentConflictObserver().observe(${JSON.stringify({
+      documentId,
+      expectedVersion: 3,
+      currentVersion: 4
+    })});`
+  ],
+  { encoding: "utf8" }
+);
+assert.equal(defaultSinkResult.status, 0, defaultSinkResult.stderr);
+assert.equal(
+  `${defaultSinkResult.stdout}${defaultSinkResult.stderr}`.trim(),
+  JSON.stringify(event),
+  "the production sink must emit one raw JSON object without a Nest text prefix"
 );
 
 console.log("Document conflict observer tests passed.");

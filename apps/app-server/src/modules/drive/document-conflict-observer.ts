@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 
 export interface DocumentSnapshotConflictObservation {
   documentId: string;
@@ -18,6 +18,12 @@ export interface DocumentConflictLogger {
   warn(message: string): void;
 }
 
+const stderrDocumentConflictLogger: DocumentConflictLogger = {
+  warn(message) {
+    process.stderr.write(`${message}\n`);
+  }
+};
+
 export function buildDocumentSnapshotConflictEvent(
   input: DocumentSnapshotConflictObservation
 ): DocumentSnapshotConflictEvent {
@@ -35,7 +41,7 @@ export class DocumentConflictObserver {
   private readonly logger: DocumentConflictLogger;
 
   constructor(@Optional() logger?: DocumentConflictLogger) {
-    this.logger = logger ?? new Logger(DocumentConflictObserver.name);
+    this.logger = logger ?? stderrDocumentConflictLogger;
   }
 
   observe(input: DocumentSnapshotConflictObservation): void {
