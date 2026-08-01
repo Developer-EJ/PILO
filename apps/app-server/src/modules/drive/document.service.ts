@@ -259,16 +259,11 @@ export class DocumentService {
         `
           SELECT
             document.*,
-            item.name,
-            snapshot.content_json AS current_snapshot_content_json
+            item.name
           FROM documents document
           JOIN drive_items item
             ON item.id = document.drive_item_id
             AND item.workspace_id = document.workspace_id
-          JOIN document_snapshots snapshot
-            ON snapshot.id = document.latest_snapshot_id
-            AND snapshot.document_id = document.id
-            AND snapshot.workspace_id = document.workspace_id
           WHERE document.id = $1
             AND document.workspace_id = $2
             AND document.deleted_at IS NULL
@@ -284,6 +279,19 @@ export class DocumentService {
       if (currentVersion !== input.expectedVersion) {
         throw conflict("Document version is outdated");
       }
+
+      const currentSnapshot = lockedDocument.latest_snapshot_id
+        ? await transaction.queryOne<Pick<DocumentSnapshotRow, "content_json">>(
+            `
+              SELECT content_json
+              FROM document_snapshots
+              WHERE id = $1
+                AND document_id = $2
+                AND workspace_id = $3
+            `,
+            [lockedDocument.latest_snapshot_id, documentId, workspaceId]
+          )
+        : null;
 
       await this.assertActiveReadyFiles(
         transaction,
@@ -343,7 +351,7 @@ export class DocumentService {
 
       const previousAttachmentFileIds = new Set(
         extractDriveFileAttachmentIds(
-          lockedDocument.current_snapshot_content_json ?? EMPTY_TIPTAP_DOCUMENT
+          currentSnapshot?.content_json ?? EMPTY_TIPTAP_DOCUMENT
         )
       );
       const currentAttachmentFileIds = new Set(input.attachmentFileIds);

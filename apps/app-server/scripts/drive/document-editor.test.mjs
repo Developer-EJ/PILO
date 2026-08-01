@@ -66,6 +66,7 @@ const activityLogService = new FakeActivityLogService();
 const database = new FakeDatabase([
   documentBootstrapRow(),
   lockedDocumentRow(),
+  currentSnapshotRow(),
   insertedSnapshotRow(),
   updatedDocumentRow()
 ]);
@@ -98,11 +99,18 @@ const saved = await service.saveDocumentSnapshot(currentUserId, workspaceId, doc
 
 assert.equal(database.transactions, 1);
 assert.match(database.queryOneCalls[1].text, /FOR UPDATE/);
-assert.match(database.queryOneCalls[2].text, /INSERT INTO document_snapshots/);
-assert.equal(database.queryOneCalls[2].values[0], nextSnapshotId);
-assert.equal(database.queryOneCalls[2].values[3], 1);
-assert.equal(database.queryOneCalls[2].values[4].toString("base64"), "AQID");
-assert.match(database.queryOneCalls[3].text, /UPDATE documents/);
+assert.doesNotMatch(
+  database.queryOneCalls[1].text,
+  /JOIN document_snapshots/,
+  "the row-lock statement must not join a snapshot created by a concurrent transaction"
+);
+assert.match(database.queryOneCalls[2].text, /SELECT content_json/);
+assert.deepEqual(database.queryOneCalls[2].values, [snapshotId, documentId, workspaceId]);
+assert.match(database.queryOneCalls[3].text, /INSERT INTO document_snapshots/);
+assert.equal(database.queryOneCalls[3].values[0], nextSnapshotId);
+assert.equal(database.queryOneCalls[3].values[3], 1);
+assert.equal(database.queryOneCalls[3].values[4].toString("base64"), "AQID");
+assert.match(database.queryOneCalls[4].text, /UPDATE documents/);
 assert.equal(saved.document.currentVersion, 1);
 assert.equal(saved.snapshot.id, nextSnapshotId);
 assert.equal(saved.snapshot.plainText, "PILO 기획서");
@@ -156,6 +164,7 @@ assert.throws(
 
 const attachmentDatabase = new FakeDatabase([
   lockedDocumentRow(),
+  currentSnapshotRow(),
   insertedSnapshotRow(),
   updatedDocumentRow()
 ]);
@@ -213,8 +222,9 @@ assert.equal(
 );
 
 const detachedAttachmentDatabase = new FakeDatabase([
-  lockedDocumentRow({
-    currentSnapshotContentJson: {
+  lockedDocumentRow(),
+  currentSnapshotRow({
+    contentJson: {
       type: "doc",
       content: [
         {
@@ -222,7 +232,7 @@ const detachedAttachmentDatabase = new FakeDatabase([
           attrs: { driveItemId: "66666666-6666-4666-8666-666666666666" }
         }
       ]
-    }
+    },
   }),
   insertedSnapshotRow(),
   updatedDocumentRow()
@@ -273,13 +283,16 @@ function documentBootstrapRow() {
   };
 }
 
-function lockedDocumentRow({ currentVersion = 0, currentSnapshotContentJson = null } = {}) {
+function lockedDocumentRow({ currentVersion = 0 } = {}) {
   return {
     ...documentRow(),
     current_version: String(currentVersion),
-    name: "PILO 기획서",
-    current_snapshot_content_json: currentSnapshotContentJson
+    name: "PILO 기획서"
   };
+}
+
+function currentSnapshotRow({ contentJson = null } = {}) {
+  return { content_json: contentJson };
 }
 
 function insertedSnapshotRow() {
