@@ -5,6 +5,7 @@ import {
   type DocumentAppServerClient,
 } from "./document-app-server-client";
 import type { DocumentRoomRef } from "./document-types";
+import type { DocumentEventLogger } from "./document-observability";
 
 export { DocumentCheckpointError } from "./document-app-server-client";
 
@@ -42,8 +43,10 @@ export type DocumentCheckpointService = {
 
 export function createDocumentCheckpointService({
   client,
+  eventLogger = () => undefined,
 }: {
   client: DocumentAppServerClient;
+  eventLogger?: DocumentEventLogger;
 }): DocumentCheckpointService {
   const currentVersionByRoom = new Map<string, number>();
 
@@ -61,13 +64,30 @@ export function createDocumentCheckpointService({
       throw new Error("Document checkpoint must load before store");
     }
 
+    const startedAt = performance.now();
+    eventLogger({
+      documentId: input.documentId,
+      event: "document_checkpoint_started",
+      expectedVersion,
+      workspaceId: input.workspaceId,
+    });
+
     try {
-      await save(input, expectedVersion);
+      const savedVersion = await save(input, expectedVersion);
+      reportSucceeded(input, expectedVersion, savedVersion, startedAt);
       return;
     } catch (error) {
       if (!(error instanceof DocumentCheckpointError) || error.status !== 409) {
+        reportFailed(input, expectedVersion, error, startedAt);
         throw error;
       }
+      eventLogger({
+        documentId: input.documentId,
+        event: "document_checkpoint_conflict",
+        expectedVersion,
+        status: error.status,
+        workspaceId: input.workspaceId,
+      });
     }
 
     const latest = await client.getDocument(input);
@@ -77,7 +97,18 @@ export function createDocumentCheckpointService({
       checkpointMergeOrigin,
     );
     currentVersionByRoom.set(key, latest.document.currentVersion);
-    await save(input, latest.document.currentVersion);
+    try {
+      const savedVersion = await save(input, latest.document.currentVersion);
+      reportSucceeded(
+        input,
+        latest.document.currentVersion,
+        savedVersion,
+        startedAt,
+      );
+    } catch (error) {
+      reportFailed(input, latest.document.currentVersion, error, startedAt);
+      throw error;
+    }
   }
 
   async function save(input: DocumentCheckpointStoreInput, expectedVersion: number) {
@@ -88,9 +119,47 @@ export function createDocumentCheckpointService({
       yjsState: Buffer.from(Y.encodeStateAsUpdate(input.document)).toString("base64"),
     });
     currentVersionByRoom.set(roomKey(input), result.document.currentVersion);
+    return result.document.currentVersion;
+  }
+
+  function reportSucceeded(
+    input: DocumentCheckpointStoreInput,
+    expectedVersion: number,
+    savedVersion: number,
+    startedAt: number,
+  ) {
+    eventLogger({
+      documentId: input.documentId,
+      durationMs: elapsedMs(startedAt),
+      event: "document_checkpoint_succeeded",
+      expectedVersion,
+      savedVersion,
+      status: 200,
+      workspaceId: input.workspaceId,
+    });
+  }
+
+  function reportFailed(
+    input: DocumentCheckpointStoreInput,
+    expectedVersion: number,
+    error: unknown,
+    startedAt: number,
+  ) {
+    eventLogger({
+      documentId: input.documentId,
+      durationMs: elapsedMs(startedAt),
+      event: "document_checkpoint_failed",
+      expectedVersion,
+      status: error instanceof DocumentCheckpointError ? error.status : 500,
+      workspaceId: input.workspaceId,
+    });
   }
 
   return { loadDocument, storeDocument };
+}
+
+function elapsedMs(startedAt: number) {
+  return Math.max(0, Math.round(performance.now() - startedAt));
 }
 
 function roomKey(room: DocumentRoomRef) {

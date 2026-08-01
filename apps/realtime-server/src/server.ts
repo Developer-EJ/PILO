@@ -10,10 +10,14 @@ import { createDocumentCheckpointService } from "./documents/document-checkpoint
 import { createDocumentHocuspocusService } from "./documents/document-hocuspocus.service";
 import { createDocumentHocuspocusTransport } from "./documents/document-hocuspocus-transport";
 import { createDocumentMembershipRevocationHandler } from "./documents/document-membership-revocation";
+import { createDocumentEventLogger } from "./documents/document-observability";
 import { createRealtimeSocketServer } from "./socket/socket-server";
 
 async function bootstrap() {
   const config = loadRealtimeServerConfig();
+  const eventLogger = createDocumentEventLogger({
+    instanceId: config.realtimeInstanceId,
+  });
   const database = createRealtimeDatabase({
     databaseApplicationName: config.databaseApplicationName,
     databasePoolConnectionTimeoutMs: config.databasePoolConnectionTimeoutMs,
@@ -66,7 +70,9 @@ async function bootstrap() {
     accessService: createDocumentAccessService({ database }),
     checkpointService: createDocumentCheckpointService({
       client: createDocumentAppServerClient({ appServerUrl: config.appServerUrl }),
+      eventLogger,
     }),
+    eventLogger,
     sessionService: createRealtimeSessionService(database),
   });
   const documentHocuspocus = documentHocuspocusService.hocuspocus;

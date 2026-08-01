@@ -134,3 +134,113 @@ test("does not retry a second 409 checkpoint conflict", async () => {
 
   assert.equal(saveCalls, 2);
 });
+
+test("reports checkpoint start and success with the saved version", async () => {
+  const events = [];
+  const service = createDocumentCheckpointService({
+    eventLogger: (event) => events.push(event),
+    client: {
+      async getDocument() {
+        return bootstrap(createDocumentWithText("initial"), 7);
+      },
+      async saveDocumentSnapshot() {
+        return { document: { currentVersion: 8 } };
+      },
+    },
+  });
+
+  await service.loadDocument({ accessToken: "secret", room });
+  await service.storeDocument({
+    accessToken: "secret",
+    document: createDocumentWithText("edited"),
+    room,
+  });
+
+  assert.deepEqual(
+    events.map(({ event }) => event),
+    ["document_checkpoint_started", "document_checkpoint_succeeded"],
+  );
+  assert.equal(events[0].expectedVersion, 7);
+  assert.equal(events[1].savedVersion, 8);
+  assert.equal(events[1].status, 200);
+  assert.equal(typeof events[1].durationMs, "number");
+  assert.equal(JSON.stringify(events).includes("secret"), false);
+});
+
+test("reports a 409 conflict before the successful merge retry", async () => {
+  const events = [];
+  let getCalls = 0;
+  let saveCalls = 0;
+  const service = createDocumentCheckpointService({
+    eventLogger: (event) => events.push(event),
+    client: {
+      async getDocument() {
+        getCalls += 1;
+        return bootstrap(createDocumentWithText("remote"), getCalls);
+      },
+      async saveDocumentSnapshot() {
+        saveCalls += 1;
+        if (saveCalls === 1) {
+          throw new DocumentCheckpointError(409, "outdated");
+        }
+        return { document: { currentVersion: 3 } };
+      },
+    },
+  });
+
+  await service.loadDocument({ accessToken: "secret", room });
+  await service.storeDocument({
+    accessToken: "secret",
+    document: createDocumentWithText("local"),
+    room,
+  });
+
+  assert.deepEqual(
+    events.map(({ event }) => event),
+    [
+      "document_checkpoint_started",
+      "document_checkpoint_conflict",
+      "document_checkpoint_succeeded",
+    ],
+  );
+  assert.equal(events[1].status, 409);
+  assert.equal(events[2].expectedVersion, 2);
+  assert.equal(events[2].savedVersion, 3);
+});
+
+test("reports a failed checkpoint when the merge retry also conflicts", async () => {
+  const events = [];
+  const service = createDocumentCheckpointService({
+    eventLogger: (event) => events.push(event),
+    client: {
+      async getDocument() {
+        return bootstrap(createDocumentWithText("remote"), 2);
+      },
+      async saveDocumentSnapshot() {
+        throw new DocumentCheckpointError(409, "outdated");
+      },
+    },
+  });
+
+  await service.loadDocument({ accessToken: "secret", room });
+  await assert.rejects(
+    () =>
+      service.storeDocument({
+        accessToken: "secret",
+        document: createDocumentWithText("local"),
+        room,
+      }),
+    /outdated/,
+  );
+
+  assert.deepEqual(
+    events.map(({ event }) => event),
+    [
+      "document_checkpoint_started",
+      "document_checkpoint_conflict",
+      "document_checkpoint_failed",
+    ],
+  );
+  assert.equal(events[2].status, 409);
+  assert.equal(typeof events[2].durationMs, "number");
+});

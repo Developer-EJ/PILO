@@ -111,6 +111,9 @@ assert.match(server, /getCanvasRoomStateStats/);
 assert.match(server, /pathname\.startsWith\("\/ws\/"\)/);
 assert.match(server, /pathname\.startsWith\("\/socket\.io\/"\)/);
 assert.match(server, /type: "ready"/);
+assert.match(server, /createDocumentEventLogger/);
+assert.match(server, /instanceId: config\.realtimeInstanceId/);
+assert.match(server, /eventLogger/);
 
 assert.match(rootReadme, /Common realtime code belongs/);
 assert.match(rootReadme, /DATABASE_URL/);
@@ -351,6 +354,7 @@ await import("../src/documents/document-checkpoint.service.test.mjs");
 await import("../src/documents/document-hocuspocus.service.test.mjs");
 await import("../src/documents/document-hocuspocus-transport.test.mjs");
 await import("../src/documents/document-route-contract.test.mjs");
+await import("../src/documents/document-observability.test.mjs");
 await import("../src/config/realtime-config.test.mjs");
 await import("../src/pdf-collaboration/pdf-collaboration-payload.test.mjs");
 await import("../src/pdf-collaboration/pdf-collaboration-room-state.test.mjs");

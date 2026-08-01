@@ -141,3 +141,38 @@ test("loads and stores a room through the checkpoint service with the authentica
     { type: "store", input: { ...context, document } },
   ]);
 });
+
+test("reports authenticated document rooms without token or user identity", async () => {
+  const events = [];
+  const service = createDocumentHocuspocusService({
+    accessService: {
+      async getDocumentRoomAccess() {
+        return { readOnly: false };
+      },
+    },
+    checkpointService: {
+      async loadDocument() {
+        return new Uint8Array();
+      },
+      async storeDocument() {},
+    },
+    eventLogger: (event) => events.push(event),
+    sessionService: {
+      async validateSessionToken() {
+        return { displayName: "PILO", userId: "private-user" };
+      },
+    },
+  });
+
+  await service.authorizeDocument(roomName(), "private-token");
+
+  assert.deepEqual(events, [
+    {
+      documentId,
+      event: "document_room_authenticated",
+      workspaceId,
+    },
+  ]);
+  assert.equal(JSON.stringify(events).includes("private-token"), false);
+  assert.equal(JSON.stringify(events).includes("private-user"), false);
+});
