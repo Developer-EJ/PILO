@@ -72,7 +72,7 @@ CloudWatch is an internal operational system and retains the raw document UUID f
 
 A small document-conflict observer owns event construction and logging. Its input type contains only the five allowed values, making accidental serialization of the save request impossible. `DocumentService` calls the observer only in the existing version mismatch branch and then throws the unchanged `Document version is outdated` conflict.
 
-The observer uses Nest's logger at warning level and serializes the bounded event with `JSON.stringify`. It catches logger failures so observability cannot turn a normal `409` into a different server error.
+The observer serializes the bounded event with `JSON.stringify` and writes exactly one JSON line to stderr. It intentionally bypasses Nest's default text formatter because that formatter adds a timestamp, process ID, level, and context around the message and prevents CloudWatch from treating `event` as a top-level JSON field. The observer catches sink failures so observability cannot turn a normal `409` into a different server error.
 
 The observer is injectable with a safe default so existing manual service construction and tests remain compatible.
 
@@ -90,7 +90,7 @@ For the `app-server` container, the next task definition must contain:
 
 The workflow must verify that the expected CloudWatch log group exists before deployment. It must not silently create a Terraform-owned resource. It also verifies the registered definition before updating the ECS service.
 
-The GitHub sync worker remains outside this observability rollout unless it uses the same App Server image and can be updated without changing its independent desired count or logging contract.
+The GitHub sync worker uses the same App Server image and is therefore updated after the App Server canary succeeds. It receives its own immutable-digest task definition, one-task verification, desired-count restoration, and prior-digest rollback. The App Server task definition is never reused for the worker.
 
 ## Rollout Sequence
 
@@ -121,6 +121,7 @@ The temporary one-task stage in step 6 is a deployment canary, not a rollback to
 - A matching version emits no conflict event.
 - A mismatch emits exactly one warning and preserves the existing `409` error.
 - A logger exception still preserves the existing `409` error.
+- The production sink emits exactly one parseable JSON object without a Nest text prefix.
 - App Server format, lint, build, and full test suite pass.
 
 ### Automated workflow checks
@@ -130,7 +131,9 @@ The temporary one-task stage in step 6 is a deployment canary, not a rollback to
 - It verifies the CloudWatch log group.
 - It registers an immutable-digest task definition containing the required `awslogs` options.
 - It deploys one task before returning to the intended count.
+- CloudWatch delivery is verified against the exact stream derived from the running canary task ID, not merely any stream with the App Server prefix.
 - A failed canary uses the prior immutable image and restores the prior count.
+- The optional GitHub sync worker independently preserves and restores its task definition, digest, and desired count.
 - `actionlint` and embedded shell checks pass.
 
 ### Dev evidence checks

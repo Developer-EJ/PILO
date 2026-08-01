@@ -35,7 +35,7 @@
 - [ ] Assert an exception thrown by the logger is swallowed.
 - [ ] Add the test to the App Server `test` command.
 - [ ] Run the focused test after build and confirm it fails because the observer module does not exist.
-- [ ] Implement the typed event builder and injectable observer with a default Nest `Logger`.
+- [ ] Implement the typed event builder and injectable observer with a raw one-line stderr sink so CloudWatch receives a top-level JSON object.
 - [ ] Re-run the focused test and confirm it passes.
 - [ ] Commit Task 1 files with `test(app): define document conflict log contract`.
 
@@ -93,7 +93,7 @@
 - [ ] Wait for service stability and confirm one running task uses the registered definition.
 - [ ] Restore the pre-deploy desired count after the canary passes.
 - [ ] On any failure after canary deployment begins, register a rollback definition using the prior immutable digest and restore the previous desired count.
-- [ ] Keep optional GitHub sync worker deployment separate and only start it after the App Server canary succeeds; do not reuse the App Server task definition for it.
+- [ ] Keep optional GitHub sync worker deployment separate and only start it after the App Server canary succeeds; capture its prior digest/count and use an independent immutable task definition, verification, and rollback path.
 - [ ] Re-run the deployment contract test.
 - [ ] Run `actionlint` and `shellcheck` against embedded workflow scripts using the established local container technique.
 - [ ] Commit Task 4 files with `fix(ci): preserve app server cloudwatch logging`.
