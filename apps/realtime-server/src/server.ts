@@ -17,10 +17,11 @@ import { createRealtimeSocketServer } from "./socket/socket-server";
 
 async function bootstrap() {
   const config = loadRealtimeServerConfig();
+  let isShuttingDown = false;
   const eventLogger = createDocumentEventLogger({
     instanceId: config.realtimeInstanceId,
   });
-  const documentRedisSync = createDocumentRedisSync({
+  const documentRedisSync = await createDocumentRedisSync({
     enabled: config.documentRedisSyncEnabled,
     eventLogger,
     instanceId: config.realtimeInstanceId,
@@ -41,13 +42,16 @@ async function bootstrap() {
     );
 
     if (url.pathname === "/health" || url.pathname === "/sync/health") {
-      response.writeHead(200, {
+      const isReady =
+        !isShuttingDown &&
+        (!config.documentRedisSyncEnabled || documentRedisSync.status === "ready");
+      response.writeHead(isReady ? 200 : 503, {
         "content-type": "application/json; charset=utf-8",
       });
       response.end(
         JSON.stringify({
           service: "pilo-realtime-server",
-          status: "ok",
+          status: isShuttingDown ? "draining" : isReady ? "ok" : "degraded",
           scope: config.scope,
           instanceId: config.realtimeInstanceId,
           classic: {
@@ -83,6 +87,7 @@ async function bootstrap() {
     accessService: createDocumentAccessService({ database }),
     checkpointService: createDocumentCheckpointService({
       client: createDocumentAppServerClient({ appServerUrl: config.appServerUrl }),
+      checkpointCoordinator: documentRedisSync.checkpointCoordinator,
       eventLogger,
       refreshBeforeStore: config.documentRedisSyncEnabled,
     }),
@@ -113,6 +118,11 @@ async function bootstrap() {
       request.url ?? "/",
       `http://${request.headers.host ?? "localhost"}`,
     );
+
+    if (isShuttingDown) {
+      socket.destroy();
+      return;
+    }
 
     if (url.pathname.startsWith("/socket.io/")) {
       return;
@@ -173,13 +183,20 @@ async function bootstrap() {
     console.log(`PILO realtime server listening on ${config.port}`);
   });
 
-  let isShuttingDown = false;
-
   async function shutdown() {
     if (isShuttingDown) {
       return;
     }
     isShuttingDown = true;
+    const closeHttpServer = new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
 
     try {
       await documentHocuspocusService.shutdown();
@@ -189,19 +206,6 @@ async function bootstrap() {
       }
       documentUpgradeSockets.clear();
       await socketServer.close();
-      const closeHttpServer = new Promise<void>((resolve, reject) => {
-        if (!server.listening) {
-          resolve();
-          return;
-        }
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-          resolve();
-        });
-      });
       await closeHttpServer;
       process.exit(0);
     } catch (error) {

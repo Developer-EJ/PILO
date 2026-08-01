@@ -6,6 +6,7 @@ import {
 } from "./document-app-server-client";
 import type { DocumentRoomRef } from "./document-types";
 import type { DocumentEventLogger } from "./document-observability";
+import type { DocumentCheckpointCoordinator } from "./document-redis-sync";
 
 export { DocumentCheckpointError } from "./document-app-server-client";
 
@@ -49,10 +50,12 @@ export type DocumentCheckpointService = {
 
 export function createDocumentCheckpointService({
   client,
+  checkpointCoordinator = null,
   eventLogger = () => undefined,
   refreshBeforeStore = false,
 }: {
   client: DocumentAppServerClient;
+  checkpointCoordinator?: DocumentCheckpointCoordinator | null;
   eventLogger?: DocumentEventLogger;
   refreshBeforeStore?: boolean;
 }): DocumentCheckpointService {
@@ -110,7 +113,7 @@ export function createDocumentCheckpointService({
       return;
     } catch (error) {
       if (!(error instanceof DocumentCheckpointError) || error.status !== 409) {
-        reportFailed(input, expectedVersion, error, startedAt);
+        reportFailed(input, saveVersion, error, startedAt);
         throw error;
       }
       eventLogger({
@@ -122,14 +125,14 @@ export function createDocumentCheckpointService({
       });
     }
 
-    const latest = await client.getDocument(input);
-    Y.applyUpdate(
-      input.document,
-      Buffer.from(latest.snapshot.yjsState, "base64"),
-      checkpointMergeOrigin,
-    );
-    currentVersionByRoom.set(key, latest.document.currentVersion);
     try {
+      const latest = await client.getDocument(input);
+      Y.applyUpdate(
+        input.document,
+        Buffer.from(latest.snapshot.yjsState, "base64"),
+        checkpointMergeOrigin,
+      );
+      currentVersionByRoom.set(key, latest.document.currentVersion);
       const savedVersion = await save(input, latest.document.currentVersion);
       reportSucceeded(
         input,
@@ -138,13 +141,16 @@ export function createDocumentCheckpointService({
         startedAt,
       );
     } catch (error) {
-      reportFailed(input, latest.document.currentVersion, error, startedAt);
+      reportFailed(input, currentVersionByRoom.get(key) ?? saveVersion, error, startedAt);
       throw error;
     }
   }
 
   function storeDocument(input: DocumentCheckpointStoreInput) {
-    const work = storeDocumentNow(input);
+    const key = roomKey(input);
+    const work = checkpointCoordinator
+      ? checkpointCoordinator.runExclusive(key, () => storeDocumentNow(input))
+      : storeDocumentNow(input);
     pendingStores.add(work);
     void work.then(
       () => pendingStores.delete(work),

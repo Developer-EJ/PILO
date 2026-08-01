@@ -149,11 +149,11 @@ test("reports checkpoint start and success with the saved version", async () => 
     },
   });
 
-  await service.loadDocument({ accessToken: "secret", room });
+  await service.loadDocument({ accessToken: "secret", ...room });
   await service.storeDocument({
     accessToken: "secret",
     document: createDocumentWithText("edited"),
-    room,
+    ...room,
   });
 
   assert.deepEqual(
@@ -340,4 +340,40 @@ test("drain waits for an in-flight checkpoint", async () => {
   releaseSave();
   await Promise.all([store, drain]);
   assert.equal(drained, true);
+});
+
+test("runs the full checkpoint inside the distributed coordinator", async () => {
+  const calls = [];
+  const service = createDocumentCheckpointService({
+    checkpointCoordinator: {
+      async runExclusive(key, work) {
+        calls.push(`enter:${key}`);
+        const result = await work();
+        calls.push(`leave:${key}`);
+        return result;
+      },
+    },
+    client: {
+      async getDocument() {
+        calls.push("get");
+        return bootstrap(createDocumentWithText("initial"), 0);
+      },
+      async saveDocumentSnapshot() {
+        calls.push("save");
+        return { document: { currentVersion: 1 } };
+      },
+    },
+    refreshBeforeStore: true,
+  });
+  await service.loadDocument({ accessToken: "secret", ...room });
+  calls.length = 0;
+
+  await service.storeDocument({
+    accessToken: "secret",
+    document: createDocumentWithText("edited"),
+    ...room,
+  });
+
+  const key = `${workspaceId}:${documentId}`;
+  assert.deepEqual(calls, [`enter:${key}`, "get", "save", `leave:${key}`]);
 });

@@ -1,8 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
+
+import { createClient } from "redis";
 
 import type { DocumentEventLogger } from "./document-observability";
 
 type RedisExtension = {
+  afterStoreDocument?: (payload: unknown) => Promise<void>;
   onDestroy: () => Promise<void>;
   onStoreDocument?: (payload: unknown) => Promise<void>;
 };
@@ -20,35 +24,80 @@ type RedisExtensionConfiguration = {
   port: number;
 };
 
+type RedisCommandClient = {
+  connect: () => Promise<unknown>;
+  destroy: () => void;
+  eval: (
+    script: string,
+    options: { arguments: string[]; keys: string[] },
+  ) => Promise<unknown>;
+  on: (event: string, listener: () => void) => unknown;
+  ping: () => Promise<string>;
+  quit: () => Promise<unknown>;
+  set: (
+    key: string,
+    value: string,
+    options: { NX: true; PX: number },
+  ) => Promise<string | null>;
+};
+
 const { Redis } = createRequire(__filename)("@hocuspocus/extension-redis") as {
   Redis: new (configuration: RedisExtensionConfiguration) => RedisExtension;
 };
 
-export type DocumentRedisSync = {
-  close: () => Promise<void>;
-  extensions: RedisExtension[];
-  status: "disabled" | "ready";
+const renewLeaseScript = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("pexpire", KEYS[1], ARGV[2])
+end
+return 0`;
+const releaseLeaseScript = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+end
+return 0`;
+
+export type DocumentCheckpointCoordinator = {
+  runExclusive: <T>(key: string, work: () => Promise<T>) => Promise<T>;
 };
 
-export function createDocumentRedisSync({
+export type DocumentRedisSync = {
+  checkpointCoordinator: DocumentCheckpointCoordinator | null;
+  close: () => Promise<void>;
+  extensions: RedisExtension[];
+  readonly status: "disabled" | "ready" | "unavailable";
+};
+
+export async function createDocumentRedisSync({
+  connectTimeoutMs = 5_000,
+  createCommandClient = (url) =>
+    createClient({ url }) as unknown as RedisCommandClient,
   createExtension = (configuration) => new Redis(configuration),
   enabled,
   eventLogger,
   instanceId,
+  leaseDurationMs = 30_000,
   lockRetryDelayMs = 50,
   maxLockWaitMs = 10_000,
   redisUrl,
 }: {
+  connectTimeoutMs?: number;
+  createCommandClient?: (url: string) => RedisCommandClient;
   createExtension?: (configuration: RedisExtensionConfiguration) => RedisExtension;
   enabled: boolean;
   eventLogger: DocumentEventLogger;
   instanceId: string;
+  leaseDurationMs?: number;
   lockRetryDelayMs?: number;
   maxLockWaitMs?: number;
   redisUrl: string | null;
-}): DocumentRedisSync {
+}): Promise<DocumentRedisSync> {
   if (!enabled) {
-    return { close: async () => undefined, extensions: [], status: "disabled" };
+    return {
+      checkpointCoordinator: null,
+      close: async () => undefined,
+      extensions: [],
+      status: "disabled",
+    };
   }
   if (!redisUrl) {
     throw new Error("DOCUMENT_REDIS_SYNC_ENABLED requires REDIS_URL");
@@ -61,56 +110,140 @@ export function createDocumentRedisSync({
   if (parsedUrl.pathname.length > 1) options.db = Number(parsedUrl.pathname.slice(1));
   if (parsedUrl.protocol === "rediss:") options.tls = {};
 
+  const commandClient = createCommandClient(redisUrl);
+  let status: DocumentRedisSync["status"] = "unavailable";
+  const updateStatus = (nextStatus: "ready" | "unavailable") => {
+    if (status === nextStatus) return;
+    status = nextStatus;
+    eventLogger({
+      event:
+        nextStatus === "ready"
+          ? "document_redis_sync_ready"
+          : "document_redis_sync_unavailable",
+      status: nextStatus,
+    });
+  };
+  commandClient.on("ready", () => updateStatus("ready"));
+  commandClient.on("end", () => updateStatus("unavailable"));
+  commandClient.on("error", () => updateStatus("unavailable"));
+  commandClient.on("reconnecting", () => updateStatus("unavailable"));
+
+  try {
+    await withTimeout(commandClient.connect(), connectTimeoutMs, "Redis connect");
+    await withTimeout(commandClient.ping(), connectTimeoutMs, "Redis ping");
+    updateStatus("ready");
+  } catch (error) {
+    commandClient.destroy();
+    throw error;
+  }
+
   const extension = createExtension({
     host: parsedUrl.hostname,
     identifier: instanceId,
-    lockTimeout: 10_000,
+    lockTimeout: leaseDurationMs,
     options,
     port: Number(parsedUrl.port || "6379"),
   });
-  retryContendedStoreLock(extension, lockRetryDelayMs, maxLockWaitMs);
-  eventLogger({ event: "document_redis_sync_ready", status: "ready" });
+  // Checkpoint locking is handled below with a renewable lease and finally-release.
+  // The official extension remains responsible for Yjs sync and awareness fan-out.
+  extension.onStoreDocument = async () => undefined;
+
+  const checkpointCoordinator: DocumentCheckpointCoordinator = {
+    async runExclusive<T>(key: string, work: () => Promise<T>) {
+      const leaseKey = `pilo:documents:checkpoint:${key}`;
+      const token = randomUUID();
+      const deadline = performance.now() + maxLockWaitMs;
+      while (true) {
+        const acquired = await commandClient.set(leaseKey, token, {
+          NX: true,
+          PX: leaseDurationMs,
+        });
+        if (acquired === "OK") break;
+        if (performance.now() >= deadline) {
+          throw new Error("Document checkpoint lock acquisition timed out");
+        }
+        await delay(lockRetryDelayMs);
+      }
+
+      let ownershipLost = false;
+      let renewalRunning = false;
+      const renew = async () => {
+        if (renewalRunning) return;
+        renewalRunning = true;
+        try {
+          const renewed = await commandClient.eval(renewLeaseScript, {
+            arguments: [token, String(leaseDurationMs)],
+            keys: [leaseKey],
+          });
+          if (Number(renewed) !== 1) ownershipLost = true;
+        } catch {
+          ownershipLost = true;
+          updateStatus("unavailable");
+        } finally {
+          renewalRunning = false;
+        }
+      };
+      const renewalTimer = setInterval(
+        () => void renew(),
+        Math.max(1, Math.floor(leaseDurationMs / 3)),
+      );
+      renewalTimer.unref();
+
+      try {
+        const result = await work();
+        if (ownershipLost) {
+          throw new Error("Document checkpoint lock ownership lost");
+        }
+        return result;
+      } finally {
+        clearInterval(renewalTimer);
+        try {
+          await commandClient.eval(releaseLeaseScript, {
+            arguments: [token],
+            keys: [leaseKey],
+          });
+        } catch {
+          updateStatus("unavailable");
+        }
+      }
+    },
+  };
 
   let closed = false;
   return {
+    checkpointCoordinator,
     async close() {
       if (closed) return;
       closed = true;
       await extension.onDestroy();
+      try {
+        await commandClient.quit();
+      } catch {
+        commandClient.destroy();
+      }
     },
     extensions: [extension],
-    status: "ready",
+    get status() {
+      return status;
+    },
   };
 }
 
-function retryContendedStoreLock(
-  extension: RedisExtension,
-  retryDelayMs: number,
-  maxWaitMs: number,
-) {
-  if (!extension.onStoreDocument) return;
-
-  const acquireStoreLock = extension.onStoreDocument.bind(extension);
-  extension.onStoreDocument = async (payload) => {
-    const deadline = performance.now() + maxWaitMs;
-    while (true) {
-      try {
-        await acquireStoreLock(payload);
-        return;
-      } catch (error) {
-        if (!isStoreLockContention(error) || performance.now() >= deadline) {
-          throw error;
-        }
-        await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs));
-      }
-    }
-  };
+function delay(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function isStoreLockContention(error: unknown) {
-  return (
-    error instanceof Error &&
-    error.name === "SkipFurtherHooksError" &&
-    error.message === "Another instance is already storing this document"
-  );
+async function withTimeout<T>(work: Promise<T>, timeoutMs: number, label: string) {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
+        timer.unref();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
