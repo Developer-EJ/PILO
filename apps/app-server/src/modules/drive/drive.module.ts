@@ -6,6 +6,7 @@ import { WorkspaceIndexingModule } from "../workspace-indexing/workspace-indexin
 import { DriveController } from "./drive.controller";
 import { DriveStorageService } from "./drive-storage.service";
 import { DriveService } from "./drive.service";
+import { DocumentConflictObserver } from "./document-conflict-observer";
 import { DocumentEmbeddingService } from "./document-embedding.service";
 import { DocumentEmbeddingOutboxPublisherService } from "./document-embedding-outbox-publisher.service";
 import { DocumentSearchService } from "./document-search.service";
@@ -16,6 +17,7 @@ import { DocumentService } from "./document.service";
   controllers: [DriveController],
   providers: [
     DocumentService,
+    DocumentConflictObserver,
     DocumentEmbeddingService,
     DocumentEmbeddingOutboxPublisherService,
     DocumentSearchService,

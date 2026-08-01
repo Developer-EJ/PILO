@@ -13,7 +13,12 @@ const snapshotId = "44444444-4444-4444-8444-444444444444";
 
 class FakeDatabase {
   constructor() {
-    this.rows = [lockedDocumentRow(), snapshotRow(), documentRow()];
+    this.rows = [
+      lockedDocumentRow(),
+      { content_json: { type: "doc", content: [{ type: "paragraph" }] } },
+      snapshotRow(),
+      documentRow()
+    ];
     this.transactions = 0;
   }
 
@@ -89,8 +94,7 @@ function lockedDocumentRow() {
     created_at: new Date("2026-07-17T00:00:00.000Z"),
     updated_at: new Date("2026-07-17T00:00:00.000Z"),
     deleted_at: null,
-    name: "PILO 기획서",
-    current_snapshot_content_json: { type: "doc", content: [{ type: "paragraph" }] }
+    name: "PILO 기획서"
   };
 }
 
