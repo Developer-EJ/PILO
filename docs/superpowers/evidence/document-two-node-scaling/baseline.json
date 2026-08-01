@@ -1,0 +1,30 @@
+{
+  "capturedAt": "2026-08-01",
+  "environment": "local Docker integration",
+  "mode": "baseline",
+  "realtimeInstances": 2,
+  "sessionCount": 5,
+  "editsPerSession": 300,
+  "totalEdits": 1500,
+  "redisSync": "disabled",
+  "checkpoint409Count": 1,
+  "persistedEditCount": 1500,
+  "reconnectedEditCount": 1500,
+  "snapshotRequests": [
+    {
+      "instanceId": "realtime-b",
+      "expectedVersion": 0,
+      "status": 200
+    },
+    {
+      "instanceId": "realtime-a",
+      "expectedVersion": 0,
+      "status": 409
+    },
+    {
+      "instanceId": "realtime-a",
+      "expectedVersion": 1,
+      "status": 200
+    }
+  ]
+}

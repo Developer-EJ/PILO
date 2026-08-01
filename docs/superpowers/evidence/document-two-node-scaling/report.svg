@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
+  <style>
+    text { font-family: "Segoe UI", "Malgun Gothic", sans-serif; fill: #e9f1ff; }
+    .muted { fill: #9fb2cc; }
+    .mono { font-family: Consolas, monospace; }
+    .small { font-size: 14px; }
+    .body { font-size: 17px; }
+    .title { font-size: 38px; font-weight: 700; }
+    .card-title { font-size: 25px; font-weight: 700; }
+    .metric { font-size: 62px; font-weight: 800; }
+  </style>
+  <rect width="1200" height="760" fill="#07111f"/>
+  <text x="58" y="55" class="small" fill="#83a9dd">LOCAL DOCKER INTEGRATION EVIDENCE</text>
+  <text x="58" y="102" class="title">Realtime Server 2노드 저장 충돌 검증</text>
+  <text x="58" y="135" class="body muted">동일 문서 · 5개 동시 세션 · 세션당 300회 편집 · PostgreSQL + Redis</text>
+
+  <rect x="58" y="175" width="527" height="450" rx="18" fill="#0c1a2c" stroke="#ff6b7d" stroke-width="3"/>
+  <rect x="615" y="175" width="527" height="450" rx="18" fill="#0c1a2c" stroke="#52d7a1" stroke-width="3"/>
+  <rect x="84" y="201" width="234" height="30" rx="15" fill="#431c29"/>
+  <text x="99" y="222" class="small" fill="#ffadb7">BEFORE · Redis 문서 동기화 OFF</text>
+  <text x="84" y="268" class="card-title">두 서버가 같은 버전을 저장</text>
+  <text x="84" y="297" class="small muted">두 인스턴스가 expectedVersion=0으로 체크포인트 요청</text>
+  <rect x="84" y="324" width="475" height="52" rx="10" fill="#081321"/>
+  <text x="102" y="356" class="mono small">realtime-b</text><text x="247" y="356" class="mono small">expectedVersion 0</text>
+  <rect x="486" y="335" width="54" height="30" rx="7" fill="#12392f"/><text x="500" y="356" class="mono small" fill="#86efc1">200</text>
+  <rect x="84" y="386" width="475" height="52" rx="10" fill="#081321"/>
+  <text x="102" y="418" class="mono small">realtime-a</text><text x="247" y="418" class="mono small">expectedVersion 0</text>
+  <rect x="486" y="397" width="54" height="30" rx="7" fill="#4a1b28"/><text x="500" y="418" class="mono small" fill="#ffb4be">409</text>
+  <rect x="84" y="448" width="475" height="52" rx="10" fill="#081321"/>
+  <text x="102" y="480" class="mono small">realtime-a</text><text x="247" y="480" class="mono small">merge → version 1 retry</text>
+  <rect x="486" y="459" width="54" height="30" rx="7" fill="#12392f"/><text x="500" y="480" class="mono small" fill="#86efc1">200</text>
+  <text x="84" y="574" class="metric" fill="#ff7e8d">1</text>
+  <text x="127" y="570" class="body muted">실제 409 Conflict</text>
+  <text x="84" y="604" class="small muted">2개 인스턴스 모두 체크포인트 시도 확인</text>
+
+  <rect x="641" y="201" width="238" height="30" rx="15" fill="#123b32"/>
+  <text x="656" y="222" class="small" fill="#8ff0c7">AFTER · Redis 분산 직렬화 ON</text>
+  <text x="641" y="268" class="card-title">문서별 체크포인트 순차 처리</text>
+  <text x="641" y="297" class="small muted">분산 store lock 안에서 최신 version을 다시 확인</text>
+  <text x="641" y="382" class="metric" fill="#5de0aa">0</text>
+  <text x="686" y="378" class="body muted">409 Conflict / 4,500 edits</text>
+  <rect x="641" y="415" width="148" height="67" rx="10" fill="#0c2830"/><text x="659" y="442" class="small" fill="#baf4db">✓ 3회 모두</text><text x="659" y="465" class="small" fill="#baf4db">실시간 수렴</text>
+  <rect x="800" y="415" width="148" height="67" rx="10" fill="#0c2830"/><text x="818" y="442" class="small" fill="#baf4db">✓ 재접속</text><text x="818" y="465" class="small" fill="#baf4db">4,500 / 4,500</text>
+  <rect x="959" y="415" width="157" height="67" rx="10" fill="#0c2830"/><text x="977" y="442" class="small" fill="#baf4db">✓ 종료 직전</text><text x="977" y="465" class="small" fill="#baf4db">변경 보존</text>
+  <rect x="641" y="510" width="475" height="45" rx="10" fill="#081321"/><text x="659" y="538" class="mono small">realtime-a · redisSync ready</text><text x="1065" y="538" class="mono small" fill="#86efc1">OK</text>
+  <rect x="641" y="565" width="475" height="45" rx="10" fill="#081321"/><text x="659" y="593" class="mono small">realtime-b · redisSync ready</text><text x="1065" y="593" class="mono small" fill="#86efc1">OK</text>
+
+  <rect x="58" y="653" width="1084" height="67" rx="13" fill="#091625" stroke="#1c304a"/>
+  <text x="78" y="680" class="small muted">검증 범위: 로컬 Docker 통합 환경. 운영 트래픽·장시간 soak·AWS 장애영역 복원력은</text>
+  <text x="78" y="702" class="small muted">dev ECS 2태스크 롤아웃 후 별도 검증 대상입니다.</text>
+  <text x="1000" y="702" class="small" fill="#6f8baa">2026-08-01</text>
+</svg>

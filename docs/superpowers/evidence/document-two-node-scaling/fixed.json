@@ -1,0 +1,48 @@
+{
+  "capturedAt": "2026-08-01",
+  "environment": "local Docker integration",
+  "mode": "fixed",
+  "realtimeInstances": 2,
+  "sessionCount": 5,
+  "editsPerSession": 300,
+  "roundCount": 3,
+  "totalEdits": 4500,
+  "nodeHealth": [
+    {
+      "instanceId": "realtime-a",
+      "redisSync": {
+        "enabled": true,
+        "status": "ready"
+      }
+    },
+    {
+      "instanceId": "realtime-b",
+      "redisSync": {
+        "enabled": true,
+        "status": "ready"
+      }
+    }
+  ],
+  "checkpoint409Count": 0,
+  "rounds": [
+    {
+      "persistedEditCount": 1500,
+      "reconnectedEditCount": 1500,
+      "liveConvergence": true
+    },
+    {
+      "persistedEditCount": 1500,
+      "reconnectedEditCount": 1500,
+      "liveConvergence": true
+    },
+    {
+      "persistedEditCount": 1500,
+      "reconnectedEditCount": 1500,
+      "liveConvergence": true
+    }
+  ],
+  "gracefulHandoff": {
+    "stoppedInstanceId": "realtime-a",
+    "markerPreserved": true
+  }
+}

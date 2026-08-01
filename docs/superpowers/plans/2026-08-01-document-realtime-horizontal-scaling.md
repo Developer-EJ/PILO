@@ -4,7 +4,7 @@
 
 **Goal:** Run two Realtime Server tasks against the same document without normal-operation checkpoint 409 conflicts, prove cross-node convergence and reconnect persistence, and retain before/after evidence suitable for an engineering resume.
 
-**Architecture:** Each task keeps its own Hocuspocus server but joins document rooms through the official Hocuspocus Redis extension. Redis distributes Yjs updates and coordinates the store hook so only one task checkpoints a document generation. PostgreSQL/App Server remains the durable source of truth, and the existing 409 merge-and-retry path remains as a defensive fallback. A feature flag supports a controlled A/B rollout and immediate rollback.
+**Architecture:** Each task keeps its own Hocuspocus server but joins document rooms through the official Hocuspocus Redis extension. Redis distributes Yjs updates and serializes store hooks. Inside that lock, the checkpoint service refreshes the App Server snapshot/version, merges peer state, skips an already-persisted duplicate, and saves only additional changes. PostgreSQL/App Server remains the durable source of truth, and the existing 409 merge-and-retry path remains as a defensive fallback. A feature flag supports a controlled A/B rollout and immediate rollback.
 
 **Tech Stack:** Node.js 24, TypeScript, Hocuspocus 4.4, `@hocuspocus/extension-redis` 4.4, Yjs, Redis 7, PostgreSQL 16, Docker Compose, AWS ECS/Fargate, Terraform, Node test runner.
 
