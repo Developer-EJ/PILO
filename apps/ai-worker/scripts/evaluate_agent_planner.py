@@ -19,6 +19,7 @@ from app.agent_multiturn_context_evaluation import (
     load_multiturn_catalog,
 )
 from app.agent_outcome_judge import OpenAiMultiTurnJudge
+from app.agent_planner_comparison import reported_suite_version
 from app.agent_planner_evaluation import (
     attach_tool_capability_catalog,
     build_evaluation_input_hashes,
@@ -28,7 +29,6 @@ from app.agent_planner_evaluation import (
     load_evaluation_suite,
     load_meeting_regression_suite,
 )
-from app.agent_planner_comparison import reported_suite_version
 from app.agent_processor import OpenAiAgentPlannerClient, OpenAiAgentRouterClient
 from app.agent_tool_retrieval import TOOL_RETRIEVER_VERSION
 from app.agent_workflow_evaluation import (
