@@ -49,6 +49,7 @@ async function bootstrap() {
           service: "pilo-realtime-server",
           status: "ok",
           scope: config.scope,
+          instanceId: config.realtimeInstanceId,
           classic: {
             canvas: {
               engine: "classic_room_state",
@@ -61,6 +62,10 @@ async function bootstrap() {
               engine: "hocuspocus",
               activeSessionCount: documentHocuspocus.getConnectionsCount(),
               roomCount: documentHocuspocus.getDocumentsCount(),
+              redisSync: {
+                enabled: config.documentRedisSyncEnabled,
+                status: documentRedisSync.status,
+              },
             },
           },
         }),

@@ -315,6 +315,7 @@ module "ecs" {
         DATABASE_APPLICATION_NAME           = "pilo-dev-realtime-server"
         APP_SERVER_URL                      = "${local.api_origin}/api/v1"
         SOCKET_IO_CORS_ORIGIN               = local.frontend_origin == "" ? "*" : local.frontend_origin
+        DOCUMENT_REDIS_SYNC_ENABLED         = "true"
       }
       secrets = module.secrets.realtime_server_ecs_secrets
     }

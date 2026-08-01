@@ -92,6 +92,21 @@ async function main() {
   await Promise.all(
     nodeDefinitions.map((node) => waitForHttp(`${node.httpUrl}/health`, node.id)),
   );
+  const nodeHealth = await Promise.all(
+    nodeDefinitions.map(async (node) => {
+      const payload = await fetch(`${node.httpUrl}/health`).then((response) => response.json());
+      assert.equal(payload.instanceId, node.id);
+      assert.equal(payload.sync?.documents?.redisSync?.enabled, mode === "fixed");
+      assert.equal(
+        payload.sync?.documents?.redisSync?.status,
+        mode === "fixed" ? "ready" : "disabled",
+      );
+      return {
+        instanceId: payload.instanceId,
+        redisSync: payload.sync.documents.redisSync,
+      };
+    }),
+  );
 
   const principal = await seedPrincipal();
   const rounds = [];
@@ -145,6 +160,7 @@ async function main() {
     gracefulHandoff,
     instanceIds: nodeDefinitions.map((node) => node.id),
     mode,
+    nodeHealth,
     normalOperation: true,
     rounds,
     sessionCount: SESSION_COUNT,
