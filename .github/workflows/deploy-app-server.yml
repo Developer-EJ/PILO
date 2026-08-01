@@ -366,20 +366,19 @@ jobs:
 
           log_ready=false
           for _ in {1..12}; do
-            log_streams=$(aws logs describe-log-streams \
+            if log_events=$(aws logs get-log-events \
               --log-group-name "$APP_SERVER_LOG_GROUP" \
-              --log-stream-name-prefix "$expected_log_stream")
-            if jq -e \
-              --arg expected_stream "$expected_log_stream" \
-              --argjson started "$CANARY_STARTED_MS" '
-                any(
-                  .logStreams[]?;
-                  .logStreamName == $expected_stream
-                  and (.lastEventTimestamp // 0) >= $started
-                )
-              ' <<< "$log_streams" > /dev/null; then
-              log_ready=true
-              break
+              --log-stream-name "$expected_log_stream" \
+              --start-time "$CANARY_STARTED_MS" \
+              --start-from-head \
+              --limit 10 2>/dev/null); then
+              if jq -e \
+                --argjson started "$CANARY_STARTED_MS" '
+                  any(.events[]?; .timestamp >= $started)
+                ' <<< "$log_events" > /dev/null; then
+                log_ready=true
+                break
+              fi
             fi
             sleep 5
           done
