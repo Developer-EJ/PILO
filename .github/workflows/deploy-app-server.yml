@@ -11,11 +11,15 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: deploy-app-server
+  cancel-in-progress: false
+
 env:
   AWS_REGION: ap-northeast-2
   ECR_REPOSITORY: pilo-app-server
-  ECS_SERVICE_KEY: app-server
   APP_PATH: apps/app-server
+  CONTAINER_NAME: app-server
 
 jobs:
   deploy:
@@ -38,7 +42,82 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Capture rollback state
+        id: previous
+        env:
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_APP_SERVER_SERVICE: ${{ vars.ECS_APP_SERVER_SERVICE }}
+          ECS_APP_SERVER_LOG_GROUP: ${{ vars.ECS_APP_SERVER_LOG_GROUP }}
+        run: |
+          set -euo pipefail
+          test -n "$ECS_CLUSTER_NAME"
+          test -n "$ECS_APP_SERVER_SERVICE"
+
+          service_json=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_APP_SERVER_SERVICE")
+          jq -e \
+            --arg service "$ECS_APP_SERVER_SERVICE" '
+              (.failures | length) == 0
+              and .services[0].serviceName == $service
+              and .services[0].desiredCount >= 1
+            ' <<< "$service_json" > /dev/null
+
+          previous_task_definition=$(jq -er '.services[0].taskDefinition' <<< "$service_json")
+          previous_desired_count=$(jq -er '.services[0].desiredCount' <<< "$service_json")
+          task_arn=$(aws ecs list-tasks \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --service-name "$ECS_APP_SERVER_SERVICE" \
+            --desired-status RUNNING \
+            --query 'taskArns[0]' \
+            --output text)
+          test -n "$task_arn"
+          test "$task_arn" != "None"
+
+          task_json=$(aws ecs describe-tasks \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --tasks "$task_arn")
+          previous_image_digest=$(jq -er \
+            --arg container "$CONTAINER_NAME" '
+              .tasks[0].containers[]
+              | select(.name == $container)
+              | .imageDigest
+            ' <<< "$task_json")
+
+          aws ecs describe-task-definition \
+            --task-definition "$previous_task_definition" \
+            --query taskDefinition > previous-task-definition.json
+          jq -e \
+            --arg container "$CONTAINER_NAME" '
+              any(.containerDefinitions[]; .name == $container)
+            ' previous-task-definition.json > /dev/null
+
+          log_group="${ECS_APP_SERVER_LOG_GROUP:-}"
+          if [[ -z "$log_group" ]]; then
+            service_prefix="${ECS_APP_SERVER_SERVICE%-app-server}"
+            if [[ "$service_prefix" == "$ECS_APP_SERVER_SERVICE" ]]; then
+              echo "Set ECS_APP_SERVER_LOG_GROUP for a non-standard service name." >&2
+              exit 1
+            fi
+            log_group="/ecs/${service_prefix}/app-server"
+          fi
+
+          log_groups=$(aws logs describe-log-groups \
+            --log-group-name-prefix "$log_group" \
+            --query 'logGroups[].logGroupName' \
+            --output json)
+          jq -e --arg name "$log_group" 'index($name) != null' \
+            <<< "$log_groups" > /dev/null
+
+          {
+            echo "task_definition=$previous_task_definition"
+            echo "desired_count=$previous_desired_count"
+            echo "image_uri=${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}@${previous_image_digest}"
+            echo "log_group=$log_group"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: ${{ env.APP_PATH }}
@@ -47,39 +126,228 @@ jobs:
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
-      - name: Deploy ECS services
+      - name: Register logged task definition
+        id: task-definition
         env:
-          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
-          ECS_APP_SERVER_SERVICE: ${{ vars.ECS_APP_SERVER_SERVICE }}
-          ECS_GITHUB_SYNC_WORKER_SERVICE: ${{ vars.ECS_GITHUB_SYNC_WORKER_SERVICE }}
+          IMAGE_URI: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}
+          APP_SERVER_LOG_GROUP: ${{ steps.previous.outputs.log_group }}
         run: |
           set -euo pipefail
 
-          services=("$ECS_APP_SERVER_SERVICE")
-          if [[ -n "${ECS_GITHUB_SYNC_WORKER_SERVICE:-}" ]]; then
-            if worker_service_name="$(aws ecs describe-services \
-              --cluster "$ECS_CLUSTER_NAME" \
-              --services "$ECS_GITHUB_SYNC_WORKER_SERVICE" \
-              --query 'services[0].serviceName' \
-              --output text)"; then
-              if [[ "$worker_service_name" == "$ECS_GITHUB_SYNC_WORKER_SERVICE" ]]; then
-                services+=("$ECS_GITHUB_SYNC_WORKER_SERVICE")
-              else
-                echo "GitHub sync worker service does not exist yet; skipping worker deployment."
-              fi
-            else
-              echo "Unable to verify GitHub sync worker service." >&2
-              exit 1
-            fi
-          fi
+          jq \
+            --arg container "$CONTAINER_NAME" \
+            --arg image "$IMAGE_URI" \
+            --arg log_group "$APP_SERVER_LOG_GROUP" \
+            --arg region "$AWS_REGION" '
+              .containerDefinitions |= map(
+                if .name == $container then
+                  .image = $image
+                  | .logConfiguration = {
+                      logDriver: "awslogs",
+                      options: {
+                        "awslogs-group": $log_group,
+                        "awslogs-region": $region,
+                        "awslogs-stream-prefix": "app-server"
+                      }
+                    }
+                else . end
+              )
+              | del(
+                  .taskDefinitionArn,
+                  .revision,
+                  .status,
+                  .requiresAttributes,
+                  .compatibilities,
+                  .registeredAt,
+                  .registeredBy
+                )
+            ' previous-task-definition.json > next-task-definition.json
 
-          for service in "${services[@]}"; do
-            aws ecs update-service \
-              --cluster "$ECS_CLUSTER_NAME" \
-              --service "$service" \
-              --force-new-deployment
-          done
+          jq -e \
+            --arg container "$CONTAINER_NAME" \
+            --arg image "$IMAGE_URI" \
+            --arg log_group "$APP_SERVER_LOG_GROUP" \
+            --arg region "$AWS_REGION" '
+              [
+                .containerDefinitions[]
+                | select(
+                    .name == $container
+                    and .image == $image
+                    and .logConfiguration.logDriver == "awslogs"
+                    and .logConfiguration.options["awslogs-group"] == $log_group
+                    and .logConfiguration.options["awslogs-region"] == $region
+                    and .logConfiguration.options["awslogs-stream-prefix"] == "app-server"
+                  )
+              ] | length == 1
+            ' next-task-definition.json > /dev/null
 
+          new_task_definition=$(aws ecs register-task-definition \
+            --cli-input-json file://next-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          test -n "$new_task_definition"
+          echo "arn=$new_task_definition" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy one-task canary
+        id: deploy-canary
+        env:
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_APP_SERVER_SERVICE: ${{ vars.ECS_APP_SERVER_SERVICE }}
+        run: |
+          set -euo pipefail
+          echo "started_ms=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --service "$ECS_APP_SERVER_SERVICE" \
+            --task-definition "${{ steps.task-definition.outputs.arn }}" \
+            --desired-count 1 \
+            --force-new-deployment
           aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER_NAME" \
-            --services "${services[@]}"
+            --services "$ECS_APP_SERVER_SERVICE"
+
+      - name: Verify one-task canary
+        env:
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_APP_SERVER_SERVICE: ${{ vars.ECS_APP_SERVER_SERVICE }}
+          APP_SERVER_URL: ${{ vars.NEXT_PUBLIC_PILO_APP_SERVER_URL }}
+          APP_SERVER_LOG_GROUP: ${{ steps.previous.outputs.log_group }}
+          CANARY_STARTED_MS: ${{ steps.deploy-canary.outputs.started_ms }}
+        run: |
+          set -euo pipefail
+          service_json=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_APP_SERVER_SERVICE")
+          jq -e \
+            --arg task_definition "${{ steps.task-definition.outputs.arn }}" '
+              .services[0].taskDefinition == $task_definition
+              and .services[0].desiredCount == 1
+              and .services[0].runningCount == 1
+              and .services[0].pendingCount == 0
+            ' <<< "$service_json" > /dev/null
+
+          test -n "$APP_SERVER_URL"
+          curl --fail --silent --show-error \
+            --retry 5 --retry-all-errors \
+            "${APP_SERVER_URL%/}/api/v1/health" > /dev/null
+
+          log_ready=false
+          for _ in {1..12}; do
+            log_streams=$(aws logs describe-log-streams \
+              --log-group-name "$APP_SERVER_LOG_GROUP" \
+              --order-by LastEventTime \
+              --descending \
+              --limit 50)
+            if jq -e \
+              --argjson started "$CANARY_STARTED_MS" '
+                any(
+                  .logStreams[]?;
+                  (.logStreamName | startswith("app-server/"))
+                  and (.lastEventTimestamp // 0) >= $started
+                )
+              ' <<< "$log_streams" > /dev/null; then
+              log_ready=true
+              break
+            fi
+            sleep 5
+          done
+          test "$log_ready" = "true"
+
+      - name: Restore intended task count
+        env:
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_APP_SERVER_SERVICE: ${{ vars.ECS_APP_SERVER_SERVICE }}
+          TARGET_COUNT: ${{ steps.previous.outputs.desired_count }}
+        run: |
+          set -euo pipefail
+          test "$TARGET_COUNT" -ge 1
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --service "$ECS_APP_SERVER_SERVICE" \
+            --task-definition "${{ steps.task-definition.outputs.arn }}" \
+            --desired-count "$TARGET_COUNT"
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_APP_SERVER_SERVICE"
+
+      - name: Deploy optional GitHub sync worker
+        id: deploy-worker
+        env:
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_GITHUB_SYNC_WORKER_SERVICE: ${{ vars.ECS_GITHUB_SYNC_WORKER_SERVICE }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ECS_GITHUB_SYNC_WORKER_SERVICE:-}" ]]; then
+            echo "GitHub sync worker is not configured; skipping."
+            exit 0
+          fi
+
+          worker_service_name=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_GITHUB_SYNC_WORKER_SERVICE" \
+            --query 'services[0].serviceName' \
+            --output text)
+          if [[ "$worker_service_name" != "$ECS_GITHUB_SYNC_WORKER_SERVICE" ]]; then
+            echo "GitHub sync worker service does not exist yet; skipping."
+            exit 0
+          fi
+
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --service "$ECS_GITHUB_SYNC_WORKER_SERVICE" \
+            --force-new-deployment
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_GITHUB_SYNC_WORKER_SERVICE"
+
+      - name: Roll back failed canary
+        if: ${{ failure() && (steps.deploy-canary.outcome == 'success' || steps.deploy-canary.outcome == 'failure') && steps.deploy-worker.outcome != 'failure' }}
+        env:
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_APP_SERVER_SERVICE: ${{ vars.ECS_APP_SERVER_SERVICE }}
+          PREVIOUS_IMAGE_URI: ${{ steps.previous.outputs.image_uri }}
+          ROLLBACK_DESIRED_COUNT: ${{ steps.previous.outputs.desired_count }}
+        run: |
+          set -euo pipefail
+          jq \
+            --arg container "$CONTAINER_NAME" \
+            --arg image "$PREVIOUS_IMAGE_URI" '
+              .containerDefinitions |= map(
+                if .name == $container then .image = $image else . end
+              )
+              | del(
+                  .taskDefinitionArn,
+                  .revision,
+                  .status,
+                  .requiresAttributes,
+                  .compatibilities,
+                  .registeredAt,
+                  .registeredBy
+                )
+            ' previous-task-definition.json > rollback-task-definition.json
+
+          rollback_task_definition=$(aws ecs register-task-definition \
+            --cli-input-json file://rollback-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --service "$ECS_APP_SERVER_SERVICE" \
+            --task-definition "$rollback_task_definition" \
+            --desired-count 1 \
+            --force-new-deployment
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_APP_SERVER_SERVICE"
+
+          if [[ "$ROLLBACK_DESIRED_COUNT" -gt 1 ]]; then
+            aws ecs update-service \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --service "$ECS_APP_SERVER_SERVICE" \
+              --task-definition "$rollback_task_definition" \
+              --desired-count "$ROLLBACK_DESIRED_COUNT"
+            aws ecs wait services-stable \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$ECS_APP_SERVER_SERVICE"
+          fi
