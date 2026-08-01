@@ -1,0 +1,63 @@
+{
+  "checkpoint409Count": 1,
+  "checkpointInstances": [
+    "realtime-a",
+    "realtime-b"
+  ],
+  "editsPerRound": 1500,
+  "gracefulHandoff": null,
+  "instanceIds": [
+    "realtime-a",
+    "realtime-b"
+  ],
+  "mode": "baseline",
+  "nodeHealth": [
+    {
+      "instanceId": "realtime-a",
+      "redisSync": {
+        "enabled": false,
+        "status": "disabled"
+      }
+    },
+    {
+      "instanceId": "realtime-b",
+      "redisSync": {
+        "enabled": false,
+        "status": "disabled"
+      }
+    }
+  ],
+  "normalOperation": true,
+  "rounds": [
+    {
+      "checkpoint409Count": 1,
+      "checkpointRequestCount": 3,
+      "liveConvergence": false,
+      "persistedEditCount": 1500,
+      "persistedVersion": 2,
+      "reconnectedEditCount": 1500
+    }
+  ],
+  "sessionCount": 5,
+  "snapshotRequests": [
+    {
+      "expectedVersion": 0,
+      "instanceId": "realtime-a",
+      "phase": "round-1",
+      "status": 200
+    },
+    {
+      "expectedVersion": 0,
+      "instanceId": "realtime-b",
+      "phase": "round-1",
+      "status": 409
+    },
+    {
+      "expectedVersion": 1,
+      "instanceId": "realtime-b",
+      "phase": "round-1",
+      "status": 200
+    }
+  ],
+  "totalEdits": 1500
+}
