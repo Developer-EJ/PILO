@@ -49,28 +49,21 @@
           <span class="tag">BEFORE · Redis 문서 동기화 OFF</span>
           <h2>두 서버가 같은 버전을 저장</h2>
           <p>두 인스턴스가 각각 <code>expectedVersion=0</code>으로 체크포인트를 요청했습니다.</p>
-          <div class="timeline">
-            <div class="event"><span>realtime-b</span><span>expectedVersion 0</span><span class="status ok">200</span></div>
-            <div class="event"><span>realtime-a</span><span>expectedVersion 0</span><span class="status conflict">409</span></div>
-            <div class="event"><span>realtime-a</span><span>merge → version 1 retry</span><span class="status ok">200</span></div>
-          </div>
-          <div class="metric"><strong>1</strong><span>실제 409 Conflict</span></div>
+          <div class="timeline" id="baseline-events"></div>
+          <div class="metric"><strong id="baseline-conflicts">-</strong><span>실제 409 Conflict</span></div>
           <p>2개 인스턴스 모두 체크포인트 시도 로그 확인</p>
         </article>
         <article class="card after">
           <span class="tag">AFTER · Redis 분산 직렬화 ON</span>
           <h2>문서별 체크포인트 순차 처리</h2>
           <p>두 노드의 문서 상태를 동기화하고 저장 락 안에서 최신 버전을 다시 확인했습니다.</p>
-          <div class="metric"><strong>0</strong><span>409 Conflict / 4,500 edits</span></div>
+          <div class="metric"><strong id="fixed-conflicts">-</strong><span id="fixed-total">409 Conflict</span></div>
           <div class="checks">
-            <div class="check">✓ 3회 모두<br />실시간 수렴</div>
-            <div class="check">✓ 재접속<br />4,500 / 4,500</div>
-            <div class="check">✓ 노드 종료 전<br />변경 보존</div>
+            <div class="check" id="fixed-rounds">검증 결과 로딩 중</div>
+            <div class="check" id="fixed-reconnect">검증 결과 로딩 중</div>
+            <div class="check" id="fixed-handoff">검증 결과 로딩 중</div>
           </div>
-          <div class="timeline">
-            <div class="event"><span>realtime-a</span><span>redisSync ready</span><span class="status ok">OK</span></div>
-            <div class="event"><span>realtime-b</span><span>redisSync ready</span><span class="status ok">OK</span></div>
-          </div>
+          <div class="timeline" id="fixed-health"></div>
         </article>
       </section>
       <div class="footer">
@@ -78,5 +71,61 @@
         <div class="date">Captured 2026-08-01</div>
       </div>
     </main>
+    <script type="module">
+      const [baseline, fixed] = await Promise.all([
+        fetch("./baseline.json").then((response) => response.json()),
+        fetch("./fixed.json").then((response) => response.json()),
+      ]);
+
+      const appendEvent = (container, instanceId, label, status) => {
+        const event = document.createElement("div");
+        event.className = "event";
+        const instance = document.createElement("span");
+        instance.textContent = instanceId;
+        const detail = document.createElement("span");
+        detail.textContent = label;
+        const outcome = document.createElement("span");
+        outcome.className = `status ${status === 409 ? "conflict" : "ok"}`;
+        outcome.textContent = String(status);
+        event.append(instance, detail, outcome);
+        container.append(event);
+      };
+
+      const baselineEvents = document.querySelector("#baseline-events");
+      baseline.snapshotRequests.forEach((request) =>
+        appendEvent(
+          baselineEvents,
+          request.instanceId,
+          `expectedVersion ${request.expectedVersion}`,
+          request.status,
+        ),
+      );
+      document.querySelector("#baseline-conflicts").textContent = baseline.checkpoint409Count;
+
+      document.querySelector("#fixed-conflicts").textContent = fixed.checkpoint409Count;
+      document.querySelector("#fixed-total").textContent =
+        `409 Conflict / ${fixed.totalEdits.toLocaleString()} edits`;
+      document.querySelector("#fixed-rounds").innerHTML =
+        `✓ ${fixed.rounds.length}회 모두<br />실시간 수렴`;
+      const reconnected = fixed.rounds.reduce(
+        (total, round) => total + round.reconnectedEditCount,
+        0,
+      );
+      document.querySelector("#fixed-reconnect").innerHTML =
+        `✓ 재접속<br />${reconnected.toLocaleString()} / ${fixed.totalEdits.toLocaleString()}`;
+      document.querySelector("#fixed-handoff").innerHTML = fixed.gracefulHandoff
+        .pendingCheckpointDrained
+        ? "✓ 종료 중 checkpoint<br />drain 및 변경 보존"
+        : "검증 실패";
+      const fixedHealth = document.querySelector("#fixed-health");
+      fixed.nodeHealth.forEach((health) =>
+        appendEvent(
+          fixedHealth,
+          health.instanceId,
+          `redisSync ${health.redisSync.status}`,
+          "OK",
+        ),
+      );
+    </script>
   </body>
 </html>

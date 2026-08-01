@@ -79,3 +79,29 @@ test("preserves a Drive API 409 for checkpoint retry handling", async () => {
       error.message === "Document version is outdated",
   );
 });
+
+test("bounds App Server requests with an abort signal", async () => {
+  let capturedSignal;
+  const client = createDocumentAppServerClient({
+    appServerUrl: "http://app-server.local/api/v1",
+    fetcher: async (_url, init) => {
+      capturedSignal = init.signal;
+      return new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            document: { currentVersion: 1 },
+            snapshot: { yjsState: "AQID" },
+          },
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    },
+    requestTimeoutMs: 25,
+  });
+
+  await client.getDocument({ ...room, accessToken: "session-token" });
+
+  assert.ok(capturedSignal instanceof AbortSignal);
+  assert.equal(capturedSignal.aborted, false);
+});

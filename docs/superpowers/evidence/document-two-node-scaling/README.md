@@ -7,6 +7,7 @@ Captured on 2026-08-01 against the local Docker integration stack: PostgreSQL, R
 ```powershell
 cd apps/realtime-server
 $env:E2E_ROUNDS='1'
+$env:E2E_RESULT_PATH='../../docs/superpowers/evidence/document-two-node-scaling/baseline.json'
 npm.cmd run test:document-two-node:e2e -- --mode=baseline
 ```
 
@@ -19,12 +20,15 @@ Raw result: [baseline.json](baseline.json)
 ```powershell
 cd apps/realtime-server
 Remove-Item Env:E2E_ROUNDS -ErrorAction SilentlyContinue
+$env:E2E_RESULT_PATH='../../docs/superpowers/evidence/document-two-node-scaling/fixed.json'
 npm.cmd run test:document-two-node:e2e -- --mode=fixed
 ```
 
-The default fixed run executes three rounds of 5 sessions × 300 edits. Both health endpoints reported Redis sync `ready`. Across 4,500 total edits, checkpoint 409 count was 0, all 4,500 edits were present after persistence and reconnect, and a change made immediately before terminating `realtime-a` remained available through `realtime-b`.
+The default fixed run executes three rounds of 5 sessions × 300 edits. Both health endpoints reported Redis sync `ready`. Across 4,500 total edits, checkpoint 409 count was 0 and all 4,500 edits were present after persistence and reconnect. The handoff phase held a real snapshot request open, initiated shutdown of the task performing that checkpoint, verified the task remained alive while the request was blocked, released the request, and then verified the two pre-shutdown markers through the surviving task and App Server snapshot.
 
 Raw result: [fixed.json](fixed.json)
+
+The runner writes these JSON files directly from the same sanitized result object printed as `TWO_NODE_E2E_RESULT_JSON`. The HTML report loads these two files at runtime; it does not contain a second manually curated result dataset.
 
 ## Scope
 

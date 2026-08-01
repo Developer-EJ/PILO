@@ -4,6 +4,7 @@ export type DocumentEventName =
   | "document_checkpoint_started"
   | "document_checkpoint_succeeded"
   | "document_redis_sync_ready"
+  | "document_redis_sync_unavailable"
   | "document_room_authenticated";
 
 export type DocumentEvent = {

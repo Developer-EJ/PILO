@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,7 @@ const SESSION_COUNT = 5;
 const EDITS_PER_SESSION = 300;
 const EDITS_PER_ROUND = SESSION_COUNT * EDITS_PER_SESSION;
 const ROUND_COUNT = Number(process.env.E2E_ROUNDS ?? (mode === "fixed" ? "3" : "1"));
+const RESULT_PATH = process.env.E2E_RESULT_PATH?.trim() || null;
 const ARRAY_NAME = "two-node-scaling-e2e-edits";
 const TIMEOUT_MS = 30_000;
 const DATABASE_URL =
@@ -45,6 +47,7 @@ const metrics = [];
 const documentEvents = [];
 const realtimeProcesses = new Map();
 let phase = "setup";
+let checkpointHold = null;
 
 const proxy = createServer(async (request, response) => {
   try {
@@ -60,6 +63,17 @@ const proxy = createServer(async (request, response) => {
     const headers = { ...request.headers };
     delete headers.host;
     delete headers["content-length"];
+
+    if (
+      checkpointHold &&
+      checkpointHold.instanceId === null &&
+      request.method === "PUT" &&
+      upstreamPath.endsWith("/snapshot")
+    ) {
+      checkpointHold.instanceId = instanceId;
+      checkpointHold.resolveStarted(instanceId);
+      await checkpointHold.waitForRelease;
+    }
 
     const upstream = await fetch(`${APP_DIRECT_ORIGIN}${upstreamPath}`, {
       body: body.length === 0 ? undefined : body,
@@ -122,7 +136,8 @@ async function main() {
   }
 
   const roundMetrics = metrics.filter((item) => item.phase.startsWith("round-"));
-  const checkpoint409Count = roundMetrics.filter((item) => item.status === 409).length;
+  const measuredMetrics = mode === "fixed" ? metrics : roundMetrics;
+  const checkpoint409Count = measuredMetrics.filter((item) => item.status === 409).length;
   const checkpointInstances = [...new Set(roundMetrics.map((item) => item.instanceId))].sort();
   const authenticatedInstances = [
     ...new Set(
@@ -162,12 +177,17 @@ async function main() {
     mode,
     nodeHealth,
     normalOperation: true,
-    rounds,
+    rounds: rounds.map(({ documentId: _documentId, ...round }) => round),
     sessionCount: SESSION_COUNT,
     snapshotRequests: metrics,
     totalEdits: EDITS_PER_ROUND * ROUND_COUNT,
   };
 
+  if (RESULT_PATH) {
+    const resultPath = resolve(RESULT_PATH);
+    await mkdir(dirname(resultPath), { recursive: true });
+    await writeFile(resultPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+  }
   console.log(`TWO_NODE_E2E_RESULT_JSON=${JSON.stringify(result)}`);
 }
 
@@ -265,28 +285,49 @@ async function runGracefulHandoff(principal, round) {
     principal.token,
     nodeDefinitions[1].id,
   );
-  const marker = `graceful-handoff-${randomUUID()}`;
+  const markerA = `graceful-handoff-a-${randomUUID()}`;
+  const markerB = `graceful-handoff-b-${randomUUID()}`;
+  const hold = armCheckpointHold();
 
   try {
-    clientA.document.getArray(ARRAY_NAME).push([marker]);
+    clientA.document.getArray(ARRAY_NAME).push([markerA]);
+    clientB.document.getArray(ARRAY_NAME).push([markerB]);
     await waitUntil(
-      () => snapshotTokens(clientB.document).includes(marker),
-      "marker replication before graceful termination",
+      () =>
+        [clientA.document, clientB.document].every((document) => {
+          const tokens = snapshotTokens(document);
+          return tokens.includes(markerA) && tokens.includes(markerB);
+        }),
+      "two-node marker replication before graceful termination",
     );
-    await stopRealtimeServer("realtime-a");
-    clientA.provider.destroy();
+    const stoppedInstanceId = await withTimeout(
+      hold.started,
+      5_000,
+      "graceful checkpoint start",
+    );
+    const stop = stopRealtimeServer(stoppedInstanceId);
+    await delay(100);
+    assert.equal(
+      realtimeProcesses.get(stoppedInstanceId).process.exitCode,
+      null,
+      "server must remain alive while its checkpoint request is held",
+    );
+    hold.release();
+    await stop;
+
+    const survivorNode = nodeDefinitions.find((node) => node.id !== stoppedInstanceId);
+    assert.ok(survivorNode);
 
     const survivor = await connectClient(
-      nodeDefinitions[1].wsUrl,
+      survivorNode.wsUrl,
       roomName,
       principal.token,
-      nodeDefinitions[1].id,
+      survivorNode.id,
     );
     try {
-      assert.ok(
-        snapshotTokens(survivor.document).includes(marker),
-        "survivor reconnect must retain the pre-termination marker",
-      );
+      const tokens = snapshotTokens(survivor.document);
+      assert.ok(tokens.includes(markerA));
+      assert.ok(tokens.includes(markerB));
     } finally {
       survivor.provider.destroy();
     }
@@ -294,14 +335,46 @@ async function runGracefulHandoff(principal, round) {
 
     await waitUntil(async () => {
       const latest = await getDocument(principal, round.documentId);
-      return snapshotTokens(decodeSnapshot(latest.snapshot.yjsState)).includes(marker);
+      const tokens = snapshotTokens(decodeSnapshot(latest.snapshot.yjsState));
+      return tokens.includes(markerA) && tokens.includes(markerB);
     }, "graceful handoff marker persistence");
 
-    return { markerPreserved: true, stoppedInstanceId: "realtime-a" };
+    return {
+      markerPreserved: true,
+      pendingCheckpointDrained: true,
+      stoppedInstanceId,
+    };
   } finally {
+    hold.release();
+    checkpointHold = null;
     clientA.provider.destroy();
     clientB.provider.destroy();
   }
+}
+
+function armCheckpointHold() {
+  let resolveStarted;
+  let resolveRelease;
+  const started = new Promise((resolvePromise) => {
+    resolveStarted = resolvePromise;
+  });
+  const waitForRelease = new Promise((resolvePromise) => {
+    resolveRelease = resolvePromise;
+  });
+  let released = false;
+  checkpointHold = {
+    instanceId: null,
+    resolveStarted,
+    waitForRelease,
+  };
+  return {
+    release() {
+      if (released) return;
+      released = true;
+      resolveRelease();
+    },
+    started,
+  };
 }
 
 function hasNodeTokens(clients, instanceId, expected, sessionIndexes) {

@@ -41,7 +41,7 @@
   <text x="686" y="378" class="body muted">409 Conflict / 4,500 edits</text>
   <rect x="641" y="415" width="148" height="67" rx="10" fill="#0c2830"/><text x="659" y="442" class="small" fill="#baf4db">✓ 3회 모두</text><text x="659" y="465" class="small" fill="#baf4db">실시간 수렴</text>
   <rect x="800" y="415" width="148" height="67" rx="10" fill="#0c2830"/><text x="818" y="442" class="small" fill="#baf4db">✓ 재접속</text><text x="818" y="465" class="small" fill="#baf4db">4,500 / 4,500</text>
-  <rect x="959" y="415" width="157" height="67" rx="10" fill="#0c2830"/><text x="977" y="442" class="small" fill="#baf4db">✓ 종료 직전</text><text x="977" y="465" class="small" fill="#baf4db">변경 보존</text>
+  <rect x="959" y="415" width="157" height="67" rx="10" fill="#0c2830"/><text x="977" y="442" class="small" fill="#baf4db">✓ 종료 중 저장</text><text x="977" y="465" class="small" fill="#baf4db">drain + 보존</text>
   <rect x="641" y="510" width="475" height="45" rx="10" fill="#081321"/><text x="659" y="538" class="mono small">realtime-a · redisSync ready</text><text x="1065" y="538" class="mono small" fill="#86efc1">OK</text>
   <rect x="641" y="565" width="475" height="45" rx="10" fill="#081321"/><text x="659" y="593" class="mono small">realtime-b · redisSync ready</text><text x="1065" y="593" class="mono small" fill="#86efc1">OK</text>
 
