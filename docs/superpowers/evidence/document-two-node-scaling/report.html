@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Realtime Server 2노드 저장 충돌 검증</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, Pretendard, system-ui, sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #07111f; color: #e9f1ff; }
+      main { width: 1180px; margin: 0 auto; padding: 52px 56px 44px; }
+      .eyebrow { color: #83a9dd; font-size: 14px; letter-spacing: .1em; text-transform: uppercase; }
+      h1 { margin: 10px 0 12px; font-size: 38px; line-height: 1.2; }
+      .subtitle { margin: 0 0 34px; color: #9fb2cc; font-size: 17px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+      .card { min-height: 360px; padding: 28px; border: 1px solid #233957; border-radius: 18px; background: #0c1a2c; box-shadow: 0 18px 50px #02081380; }
+      .card.before { border-top: 4px solid #ff6b7d; }
+      .card.after { border-top: 4px solid #52d7a1; }
+      .tag { display: inline-flex; padding: 6px 10px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+      .before .tag { color: #ffadb7; background: #431c29; }
+      .after .tag { color: #8ff0c7; background: #123b32; }
+      h2 { margin: 15px 0 5px; font-size: 25px; }
+      .card p { margin: 0; color: #9fb2cc; }
+      .timeline { display: grid; gap: 10px; margin: 26px 0; }
+      .event { display: grid; grid-template-columns: 96px 1fr 62px; align-items: center; gap: 12px; padding: 12px 14px; background: #081321; border-radius: 11px; font-family: ui-monospace, monospace; font-size: 14px; }
+      .status { text-align: center; padding: 5px 7px; border-radius: 7px; font-weight: 800; }
+      .ok { color: #86efc1; background: #12392f; }
+      .conflict { color: #ffb4be; background: #4a1b28; }
+      .metric { display: flex; align-items: baseline; gap: 10px; margin: 24px 0 5px; }
+      .metric strong { font-size: 56px; letter-spacing: -.04em; }
+      .before .metric strong { color: #ff7e8d; }
+      .after .metric strong { color: #5de0aa; }
+      .metric span { color: #9fb2cc; }
+      .checks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 22px; }
+      .check { padding: 13px 12px; border-radius: 10px; background: #0c2830; color: #baf4db; font-size: 13px; line-height: 1.4; }
+      .footer { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-top: 26px; padding: 18px 20px; border: 1px solid #1c304a; border-radius: 13px; background: #091625; }
+      .scope { color: #92a8c3; font-size: 13px; line-height: 1.6; max-width: 760px; }
+      code { color: #c9dcf6; }
+      .date { color: #6f8baa; font-size: 13px; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">Local Docker integration evidence</div>
+      <h1>Realtime Server 2노드 저장 충돌 검증</h1>
+      <p class="subtitle">동일 문서 · 5개 동시 세션 · 세션당 300회 편집 · PostgreSQL + Redis</p>
+      <section class="grid">
+        <article class="card before">
+          <span class="tag">BEFORE · Redis 문서 동기화 OFF</span>
+          <h2>두 서버가 같은 버전을 저장</h2>
+          <p>두 인스턴스가 각각 <code>expectedVersion=0</code>으로 체크포인트를 요청했습니다.</p>
+          <div class="timeline">
+            <div class="event"><span>realtime-b</span><span>expectedVersion 0</span><span class="status ok">200</span></div>
+            <div class="event"><span>realtime-a</span><span>expectedVersion 0</span><span class="status conflict">409</span></div>
+            <div class="event"><span>realtime-a</span><span>merge → version 1 retry</span><span class="status ok">200</span></div>
+          </div>
+          <div class="metric"><strong>1</strong><span>실제 409 Conflict</span></div>
+          <p>2개 인스턴스 모두 체크포인트 시도 로그 확인</p>
+        </article>
+        <article class="card after">
+          <span class="tag">AFTER · Redis 분산 직렬화 ON</span>
+          <h2>문서별 체크포인트 순차 처리</h2>
+          <p>두 노드의 문서 상태를 동기화하고 저장 락 안에서 최신 버전을 다시 확인했습니다.</p>
+          <div class="metric"><strong>0</strong><span>409 Conflict / 4,500 edits</span></div>
+          <div class="checks">
+            <div class="check">✓ 3회 모두<br />실시간 수렴</div>
+            <div class="check">✓ 재접속<br />4,500 / 4,500</div>
+            <div class="check">✓ 노드 종료 전<br />변경 보존</div>
+          </div>
+          <div class="timeline">
+            <div class="event"><span>realtime-a</span><span>redisSync ready</span><span class="status ok">OK</span></div>
+            <div class="event"><span>realtime-b</span><span>redisSync ready</span><span class="status ok">OK</span></div>
+          </div>
+        </article>
+      </section>
+      <div class="footer">
+        <div class="scope"><strong>검증 범위:</strong> 로컬 Docker 통합 환경의 결정적 재현 및 회귀 테스트. 운영 트래픽 규모, 장시간 soak, AWS 장애영역 복원력은 dev ECS 2태스크 롤아웃 후 별도 검증 대상입니다.</div>
+        <div class="date">Captured 2026-08-01</div>
+      </div>
+    </main>
+  </body>
+</html>
