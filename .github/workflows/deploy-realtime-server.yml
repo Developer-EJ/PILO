@@ -140,7 +140,7 @@ jobs:
             .containerDefinitions |= map(
               if .name == $container then
                 .image = $image
-                | .stopTimeout = 45
+                | .stopTimeout = 60
                 | .environment = (
                     (.environment // [] | map(select(.name != "DOCUMENT_REDIS_SYNC_ENABLED")))
                     + [{"name":"DOCUMENT_REDIS_SYNC_ENABLED","value":"true"}]

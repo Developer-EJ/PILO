@@ -78,7 +78,7 @@ export function createDocumentHocuspocusService({
   extensions = [],
   instanceId = "pilo-realtime-server",
   sessionService,
-  shutdownTimeoutMs = 20_000,
+  shutdownTimeoutMs = 40_000,
 }: {
   accessService: DocumentAccessService;
   checkpointService: DocumentCheckpointService;

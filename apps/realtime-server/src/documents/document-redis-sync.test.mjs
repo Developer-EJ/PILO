@@ -177,7 +177,7 @@ test("waits for both Yjs Redis pub/sub transports before reporting ready", async
   await sync.close();
 });
 
-test("marks Redis sync unavailable when Yjs pub/sub reconnects", async () => {
+test("latches Redis sync unavailable after Yjs pub/sub reconnects", async () => {
   const fake = createFakeClient();
   const extension = createFakeExtension();
   const sync = await createDocumentRedisSync({
@@ -192,7 +192,7 @@ test("marks Redis sync unavailable when Yjs pub/sub reconnects", async () => {
   extension.sub.emit("reconnecting");
   assert.equal(sync.status, "unavailable");
   extension.sub.emit("ready");
-  assert.equal(sync.status, "ready");
+  assert.equal(sync.status, "unavailable");
   await sync.close();
 });
 

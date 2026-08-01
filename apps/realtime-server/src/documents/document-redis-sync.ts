@@ -169,16 +169,23 @@ export async function createDocumentRedisSync({
     resource: "pub" | "sub",
     client: RedisSyncTransportClient,
   ) => {
+    let initialReadyObserved = false;
+    let unavailableAfterReady = false;
     let resolveInitialReady: (() => void) | undefined;
     const initialReady = new Promise<void>((resolve) => {
       resolveInitialReady = resolve;
     });
     const markReady = () => {
+      if (unavailableAfterReady) return;
+      initialReadyObserved = true;
       setReadiness(resource, true);
       resolveInitialReady?.();
       resolveInitialReady = undefined;
     };
-    const markUnavailable = () => setReadiness(resource, false);
+    const markUnavailable = () => {
+      if (initialReadyObserved) unavailableAfterReady = true;
+      setReadiness(resource, false);
+    };
     client.on("ready", markReady);
     client.on("close", markUnavailable);
     client.on("end", markUnavailable);

@@ -24,8 +24,8 @@ assert.match(scaleOldStep, /--desired-count 1/);
 assert.doesNotMatch(scaleOldStep, /--task-definition/);
 assert.match(scaleOldStep, /services-stable/);
 
-assert.match(workflow, /\.stopTimeout = 45/);
+assert.match(workflow, /\.stopTimeout = 60/);
 assert.match(ecsModule, /stopTimeout\s*=\s*each\.value\.stop_timeout_seconds/);
-assert.match(devEnvironment, /stop_timeout_seconds\s*=\s*45/);
+assert.match(devEnvironment, /stop_timeout_seconds\s*=\s*60/);
 
 console.log("Realtime Server serialized deployment contract verified.");

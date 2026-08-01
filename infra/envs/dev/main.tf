@@ -304,7 +304,7 @@ module "ecs" {
       security_group_ids   = [module.security_groups.realtime_server_security_group_id]
       task_role_arn        = module.iam.realtime_server_task_role_arn
       target_group_arn     = module.alb.realtime_target_group_arn
-      stop_timeout_seconds = 45
+      stop_timeout_seconds = 60
       environment = {
         APP_ENV                             = var.environment
         AWS_REGION                          = var.aws_region
