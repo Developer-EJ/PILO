@@ -6,6 +6,15 @@ on:
     paths:
       - "apps/realtime-server/**"
   workflow_dispatch:
+    inputs:
+      desired_count:
+        description: "Canary with 1 task, then scale to 2 after health verification"
+        required: true
+        default: "1"
+        type: choice
+        options:
+          - "1"
+          - "2"
 
 permissions:
   contents: read
@@ -15,6 +24,7 @@ env:
   AWS_REGION: ap-northeast-2
   ECR_REPOSITORY: pilo-realtime-server
   APP_PATH: apps/realtime-server
+  CONTAINER_NAME: realtime-server
 
 jobs:
   deploy:
@@ -46,9 +56,81 @@ jobs:
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
-      - name: Deploy ECS service
+      - name: Register coordinated task definition
+        id: task-definition
+        env:
+          DESIRED_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.desired_count || '' }}
         run: |
-          aws ecs update-service \
+          current_task_definition=$(aws ecs describe-services \
             --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
-            --service "${{ vars.ECS_REALTIME_SERVER_SERVICE }}" \
+            --services "${{ vars.ECS_REALTIME_SERVER_SERVICE }}" \
+            --query 'services[0].taskDefinition' \
+            --output text)
+
+          aws ecs describe-task-definition \
+            --task-definition "$current_task_definition" \
+            --query taskDefinition > current-task-definition.json
+
+          jq --arg container "$CONTAINER_NAME" '
+            .containerDefinitions |= map(
+              if .name == $container then
+                .environment = (
+                  (.environment // [] | map(select(.name != "DOCUMENT_REDIS_SYNC_ENABLED")))
+                  + [{"name":"DOCUMENT_REDIS_SYNC_ENABLED","value":"true"}]
+                )
+              else . end
+            )
+            | del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .registeredBy
+              )
+          ' current-task-definition.json > next-task-definition.json
+
+          new_task_definition=$(aws ecs register-task-definition \
+            --cli-input-json file://next-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          echo "arn=$new_task_definition" >> "$GITHUB_OUTPUT"
+
+          update_args=(
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}"
+            --service "${{ vars.ECS_REALTIME_SERVER_SERVICE }}"
+            --task-definition "$new_task_definition"
             --force-new-deployment
+          )
+          if [[ -n "$DESIRED_COUNT" ]]; then
+            update_args+=(--desired-count "$DESIRED_COUNT")
+          fi
+          aws ecs update-service "${update_args[@]}"
+          aws ecs wait services-stable \
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+            --services "${{ vars.ECS_REALTIME_SERVER_SERVICE }}"
+
+      - name: Verify Redis document sync health
+        env:
+          DESIRED_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.desired_count || '' }}
+          REALTIME_SERVER_URL: ${{ vars.NEXT_PUBLIC_PILO_REALTIME_SERVER_URL }}
+        run: |
+          instance_ids=()
+          for _ in {1..20}; do
+            health=$(curl --fail --silent --show-error \
+              --retry 3 --retry-all-errors \
+              "${REALTIME_SERVER_URL%/}/sync/health")
+            jq -e '
+              .status == "ok" and
+              .sync.documents.redisSync.enabled == true and
+              .sync.documents.redisSync.status == "ready"
+            ' <<< "$health" > /dev/null
+            instance_ids+=("$(jq -r '.instanceId' <<< "$health")")
+          done
+
+          unique_instance_count=$(printf '%s\n' "${instance_ids[@]}" | sort -u | wc -l)
+          if [[ "$DESIRED_COUNT" == "2" && "$unique_instance_count" -lt 2 ]]; then
+            echo "Expected health responses from two Realtime Server instances" >&2
+            exit 1
+          fi
