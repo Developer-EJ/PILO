@@ -41,6 +41,7 @@ assert.match(
 assert.match(workflow, /aws logs get-log-events/);
 assert.match(workflow, /--log-stream-name "\$expected_log_stream"/);
 assert.match(workflow, /--start-time "\$CANARY_STARTED_MS"/);
+assert.match(workflow, /--no-paginate/);
 assert.doesNotMatch(workflow, /aws logs describe-log-streams/);
 assert.match(workflow, /Restore intended task count/);
 
