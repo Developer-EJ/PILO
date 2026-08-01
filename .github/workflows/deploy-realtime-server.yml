@@ -47,7 +47,40 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Capture rollback state
+        id: previous
+        run: |
+          service_json=$(aws ecs describe-services \
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+            --services "${{ vars.ECS_REALTIME_SERVER_SERVICE }}")
+          previous_task_definition=$(jq -er '.services[0].taskDefinition' <<< "$service_json")
+          previous_desired_count=$(jq -er '.services[0].desiredCount' <<< "$service_json")
+          task_arn=$(aws ecs list-tasks \
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+            --service-name "${{ vars.ECS_REALTIME_SERVER_SERVICE }}" \
+            --desired-status RUNNING \
+            --query 'taskArns[0]' \
+            --output text)
+          test -n "$task_arn"
+          test "$task_arn" != "None"
+
+          task_json=$(aws ecs describe-tasks \
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+            --tasks "$task_arn")
+          previous_image_digest=$(jq -er \
+            --arg container "$CONTAINER_NAME" \
+            '.tasks[0].containers[] | select(.name == $container) | .imageDigest' \
+            <<< "$task_json")
+
+          aws ecs describe-task-definition \
+            --task-definition "$previous_task_definition" \
+            --query taskDefinition > previous-task-definition.json
+
+          echo "desired_count=$previous_desired_count" >> "$GITHUB_OUTPUT"
+          echo "image_uri=${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}@${previous_image_digest}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: ${{ env.APP_PATH }}
@@ -59,25 +92,18 @@ jobs:
       - name: Register coordinated task definition
         id: task-definition
         env:
-          DESIRED_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.desired_count || '' }}
+          IMAGE_URI: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}
         run: |
-          current_task_definition=$(aws ecs describe-services \
-            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
-            --services "${{ vars.ECS_REALTIME_SERVER_SERVICE }}" \
-            --query 'services[0].taskDefinition' \
-            --output text)
-
-          aws ecs describe-task-definition \
-            --task-definition "$current_task_definition" \
-            --query taskDefinition > current-task-definition.json
-
-          jq --arg container "$CONTAINER_NAME" '
+          jq \
+            --arg container "$CONTAINER_NAME" \
+            --arg image "$IMAGE_URI" '
             .containerDefinitions |= map(
               if .name == $container then
-                .environment = (
-                  (.environment // [] | map(select(.name != "DOCUMENT_REDIS_SYNC_ENABLED")))
-                  + [{"name":"DOCUMENT_REDIS_SYNC_ENABLED","value":"true"}]
-                )
+                .image = $image
+                | .environment = (
+                    (.environment // [] | map(select(.name != "DOCUMENT_REDIS_SYNC_ENABLED")))
+                    + [{"name":"DOCUMENT_REDIS_SYNC_ENABLED","value":"true"}]
+                  )
               else . end
             )
             | del(
@@ -89,7 +115,18 @@ jobs:
                 .registeredAt,
                 .registeredBy
               )
-          ' current-task-definition.json > next-task-definition.json
+          ' previous-task-definition.json > next-task-definition.json
+
+          jq -e \
+            --arg container "$CONTAINER_NAME" \
+            --arg image "$IMAGE_URI" '
+              any(
+                .containerDefinitions[];
+                .name == $container
+                and .image == $image
+                and any(.environment[]; .name == "DOCUMENT_REDIS_SYNC_ENABLED" and .value == "true")
+              )
+            ' next-task-definition.json > /dev/null
 
           new_task_definition=$(aws ecs register-task-definition \
             --cli-input-json file://next-task-definition.json \
@@ -97,23 +134,52 @@ jobs:
             --output text)
           echo "arn=$new_task_definition" >> "$GITHUB_OUTPUT"
 
-          update_args=(
-            --cluster "${{ vars.ECS_CLUSTER_NAME }}"
-            --service "${{ vars.ECS_REALTIME_SERVER_SERVICE }}"
-            --task-definition "$new_task_definition"
+      - name: Deploy one-task canary
+        id: deploy-canary
+        run: |
+          aws ecs update-service \
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+            --service "${{ vars.ECS_REALTIME_SERVER_SERVICE }}" \
+            --task-definition "${{ steps.task-definition.outputs.arn }}" \
+            --desired-count 1 \
             --force-new-deployment
-          )
-          if [[ -n "$DESIRED_COUNT" ]]; then
-            update_args+=(--desired-count "$DESIRED_COUNT")
-          fi
-          aws ecs update-service "${update_args[@]}"
           aws ecs wait services-stable \
             --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
             --services "${{ vars.ECS_REALTIME_SERVER_SERVICE }}"
 
-      - name: Verify Redis document sync health
+      - name: Verify one-task canary health
         env:
-          DESIRED_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.desired_count || '' }}
+          REALTIME_SERVER_URL: ${{ vars.NEXT_PUBLIC_PILO_REALTIME_SERVER_URL }}
+        run: |
+          for _ in {1..5}; do
+            health=$(curl --fail --silent --show-error \
+              --retry 3 --retry-all-errors \
+              "${REALTIME_SERVER_URL%/}/sync/health")
+            jq -e '
+              .status == "ok" and
+              (.instanceId | length > 0) and
+              .sync.documents.redisSync.enabled == true and
+              .sync.documents.redisSync.status == "ready"
+            ' <<< "$health" > /dev/null
+          done
+
+      - name: Scale verified revision to target count
+        env:
+          TARGET_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.desired_count || steps.previous.outputs.desired_count }}
+        run: |
+          test "$TARGET_COUNT" = "1" || test "$TARGET_COUNT" = "2"
+          aws ecs update-service \
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+            --service "${{ vars.ECS_REALTIME_SERVER_SERVICE }}" \
+            --task-definition "${{ steps.task-definition.outputs.arn }}" \
+            --desired-count "$TARGET_COUNT"
+          aws ecs wait services-stable \
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+            --services "${{ vars.ECS_REALTIME_SERVER_SERVICE }}"
+
+      - name: Verify target task count and Redis health
+        env:
+          TARGET_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.desired_count || steps.previous.outputs.desired_count }}
           REALTIME_SERVER_URL: ${{ vars.NEXT_PUBLIC_PILO_REALTIME_SERVER_URL }}
         run: |
           instance_ids=()
@@ -130,7 +196,55 @@ jobs:
           done
 
           unique_instance_count=$(printf '%s\n' "${instance_ids[@]}" | sort -u | wc -l)
-          if [[ "$DESIRED_COUNT" == "2" && "$unique_instance_count" -lt 2 ]]; then
+          if [[ "$TARGET_COUNT" == "2" && "$unique_instance_count" -lt 2 ]]; then
             echo "Expected health responses from two Realtime Server instances" >&2
             exit 1
+          fi
+
+      - name: Roll back failed canary
+        if: ${{ failure() && (steps.deploy-canary.outcome == 'success' || steps.deploy-canary.outcome == 'failure') }}
+        env:
+          PREVIOUS_DESIRED_COUNT: ${{ steps.previous.outputs.desired_count }}
+          PREVIOUS_IMAGE_URI: ${{ steps.previous.outputs.image_uri }}
+        run: |
+          jq \
+            --arg container "$CONTAINER_NAME" \
+            --arg image "$PREVIOUS_IMAGE_URI" '
+              .containerDefinitions |= map(
+                if .name == $container then .image = $image else . end
+              )
+              | del(
+                  .taskDefinitionArn,
+                  .revision,
+                  .status,
+                  .requiresAttributes,
+                  .compatibilities,
+                  .registeredAt,
+                  .registeredBy
+                )
+            ' previous-task-definition.json > rollback-task-definition.json
+
+          rollback_task_definition=$(aws ecs register-task-definition \
+            --cli-input-json file://rollback-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          aws ecs update-service \
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+            --service "${{ vars.ECS_REALTIME_SERVER_SERVICE }}" \
+            --task-definition "$rollback_task_definition" \
+            --desired-count 1 \
+            --force-new-deployment
+          aws ecs wait services-stable \
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+            --services "${{ vars.ECS_REALTIME_SERVER_SERVICE }}"
+
+          if [[ "$PREVIOUS_DESIRED_COUNT" != "1" ]]; then
+            aws ecs update-service \
+              --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+              --service "${{ vars.ECS_REALTIME_SERVER_SERVICE }}" \
+              --task-definition "$rollback_task_definition" \
+              --desired-count "$PREVIOUS_DESIRED_COUNT"
+            aws ecs wait services-stable \
+              --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+              --services "${{ vars.ECS_REALTIME_SERVER_SERVICE }}"
           fi
