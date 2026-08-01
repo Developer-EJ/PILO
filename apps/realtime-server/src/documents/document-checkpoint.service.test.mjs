@@ -244,3 +244,100 @@ test("reports a failed checkpoint when the merge retry also conflicts", async ()
   assert.equal(events[2].status, 409);
   assert.equal(typeof events[2].durationMs, "number");
 });
+
+test("refreshes the App version inside distributed checkpoint serialization", async () => {
+  const saved = [];
+  let getCalls = 0;
+  const service = createDocumentCheckpointService({
+    client: {
+      async getDocument() {
+        getCalls += 1;
+        return bootstrap(
+          createDocumentWithText(getCalls === 1 ? "initial" : "remote"),
+          getCalls === 1 ? 0 : 1,
+        );
+      },
+      async saveDocumentSnapshot(input) {
+        saved.push(input);
+        return { document: { currentVersion: 2 } };
+      },
+    },
+    refreshBeforeStore: true,
+  });
+
+  await service.loadDocument({ accessToken: "secret", room });
+  await service.storeDocument({
+    accessToken: "secret",
+    document: createDocumentWithText("local"),
+    room,
+  });
+
+  assert.equal(getCalls, 2);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].expectedVersion, 1);
+  assert.match(readCheckpointText(saved[0].yjsState), /local/);
+  assert.match(readCheckpointText(saved[0].yjsState), /remote/);
+});
+
+test("skips a duplicate distributed checkpoint already persisted by its peer", async () => {
+  const sharedDocument = createDocumentWithText("shared");
+  let saveCalls = 0;
+  const service = createDocumentCheckpointService({
+    client: {
+      async getDocument() {
+        return bootstrap(sharedDocument, 1);
+      },
+      async saveDocumentSnapshot() {
+        saveCalls += 1;
+        return { document: { currentVersion: 2 } };
+      },
+    },
+    refreshBeforeStore: true,
+  });
+
+  await service.loadDocument({ accessToken: "secret", room });
+  const peerDocument = new Y.Doc();
+  Y.applyUpdate(peerDocument, Y.encodeStateAsUpdate(sharedDocument));
+  await service.storeDocument({
+    accessToken: "secret",
+    document: peerDocument,
+    room,
+  });
+
+  assert.equal(saveCalls, 0);
+});
+
+test("drain waits for an in-flight checkpoint", async () => {
+  let releaseSave;
+  const saveBlocked = new Promise((resolve) => {
+    releaseSave = resolve;
+  });
+  const service = createDocumentCheckpointService({
+    client: {
+      async getDocument() {
+        return bootstrap(createDocumentWithText("initial"), 0);
+      },
+      async saveDocumentSnapshot() {
+        await saveBlocked;
+        return { document: { currentVersion: 1 } };
+      },
+    },
+  });
+  await service.loadDocument({ accessToken: "secret", room });
+  const store = service.storeDocument({
+    accessToken: "secret",
+    document: createDocumentWithText("edited"),
+    room,
+  });
+
+  let drained = false;
+  const drain = service.drain().then(() => {
+    drained = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(drained, false);
+
+  releaseSave();
+  await Promise.all([store, drain]);
+  assert.equal(drained, true);
+});

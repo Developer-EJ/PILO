@@ -40,6 +40,8 @@ type HocuspocusConstructor = new <Context>(configuration: {
   }) => Promise<void>;
   afterUnloadDocument: () => void;
   debounce: number;
+  extensions: readonly unknown[];
+  name: string;
   unloadImmediately: boolean;
 }) => HocuspocusDocumentServer;
 
@@ -70,11 +72,15 @@ export function createDocumentHocuspocusService({
   accessService,
   checkpointService,
   eventLogger = () => undefined,
+  extensions = [],
+  instanceId = "pilo-realtime-server",
   sessionService,
 }: {
   accessService: DocumentAccessService;
   checkpointService: DocumentCheckpointService;
   eventLogger?: DocumentEventLogger;
+  extensions?: readonly unknown[];
+  instanceId?: string;
   sessionService: RealtimeSessionService;
 }): DocumentHocuspocusService {
   const shutdownWaiters = new Set<() => void>();
@@ -147,20 +153,25 @@ export function createDocumentHocuspocusService({
       resolveShutdownWaiters(hocuspocus);
     },
     debounce: 1_000,
+    extensions,
+    name: instanceId,
     unloadImmediately: true,
   });
 
   async function shutdown() {
+    hocuspocus.closeConnections();
+    hocuspocus.flushPendingStores();
+    await checkpointService.drain();
+
     if (hocuspocus.getDocumentsCount() === 0) {
       return;
     }
 
     await new Promise<void>((resolve) => {
       shutdownWaiters.add(resolve);
-      hocuspocus.closeConnections();
-      hocuspocus.flushPendingStores();
       resolveShutdownWaiters(hocuspocus);
     });
+    await checkpointService.drain();
   }
 
   return { authorizeDocument, hocuspocus, loadDocument, shutdown, storeDocument };
