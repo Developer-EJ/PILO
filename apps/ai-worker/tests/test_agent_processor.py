@@ -2745,6 +2745,78 @@ def test_multiple_explicit_report_titles_require_clarification(
     assert "제목 하나" in (corrected.clarification_question or "")
 
 
+def test_cancelled_explicit_report_title_does_not_require_router_clarification() -> None:
+    tools = [
+        tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
+        tool_snapshot(name="search_meeting_transcript", inputSchema={"type": "object"}),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=meeting_search_catalog(tools))
+    )
+    assert job.tool_capability_catalog is not None
+
+    corrected = _normalize_meeting_report_search_routing(
+        AgentRoutingDecision(
+            status="routed",
+            domains=("meeting",),
+            capability_ids=("meeting.report.hybrid_search",),
+            intent_summary="회의록 제목과 내용 검색",
+            confidence="high",
+            clarification_question=None,
+            unsupported_reason=None,
+        ),
+        job.tool_capability_catalog,
+        prompt='제목이 "온보딩 회의"인 회의록 말고 제목이 "배포 회의"인 회의록 찾아줘',
+    )
+
+    assert corrected.status == "routed"
+    assert corrected.capability_ids == ("meeting.report.hybrid_search",)
+    assert corrected.intent_summary.startswith("명시한 회의록 제목")
+
+
+def test_cancelled_title_recovers_router_clarification_with_unified_search() -> None:
+    tools = [
+        tool_snapshot(
+            name="search_meeting_reports",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {"type": "string"},
+                    "reportTitle": {"type": "string"},
+                },
+            },
+        )
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=meeting_search_with_unified_catalog(tools),
+        )
+    )
+    assert job.tool_capability_catalog is not None
+
+    corrected = _normalize_meeting_report_search_routing(
+        AgentRoutingDecision(
+            status="needs_clarification",
+            domains=("meeting",),
+            capability_ids=(),
+            intent_summary="두 회의록 제목 중 검색할 대상을 확인해야 합니다.",
+            confidence="low",
+            clarification_question="두 제목 중 어떤 회의록을 찾을까요?",
+            unsupported_reason=None,
+        ),
+        job.tool_capability_catalog,
+        prompt='제목이 "온보딩 회의"인 회의록 말고 제목이 "배포 회의"인 회의록 찾아줘',
+    )
+
+    assert corrected.status == "routed"
+    assert corrected.capability_ids == ("meeting.report.unified_search",)
+    assert corrected.confidence == "medium"
+    assert corrected.clarification_question is None
+
+
 @pytest.mark.parametrize(
     ("prompt", "expected"),
     [
@@ -5833,6 +5905,367 @@ def test_current_turn_evidence_scope_keeps_date_and_count_together() -> None:
         "limit": 3,
         "to": "2026-07-26T15:00:00.000Z",
     }
+
+
+@pytest.mark.parametrize(
+    ("prompt", "report_title", "query"),
+    [
+        (
+            "토요일 데일리스크럼: 회의록 워커 분리 및 배포/DB 진행 공류에서 "
+            "결정한 내용을 알려줘.",
+            "토요일 데일리스크럼: 회의록 워커 분리 및 배포/DB 진행 공류",
+            "결정한 내용",
+        ),
+        (
+            "토요일 데일리스크럼 배포 검토 회의의 내용을 알려줘.",
+            "토요일 데일리스크럼 배포 검토 회의",
+            "배포 검토",
+        ),
+        (
+            "이전 조건은 취소하고, 토요일 데일리스크럼: 회의록 워커 분리 및 "
+            "배포/DB 진행 공유에서 결정사항을 알려줘.",
+            "토요일 데일리스크럼: 회의록 워커 분리 및 배포/DB 진행 공유",
+            "결정사항",
+        ),
+    ],
+)
+def test_current_turn_scope_keeps_valid_planner_title_with_weekday_words(
+    prompt: str,
+    report_title: str,
+    query: str,
+) -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": query,
+                "fallback": "none",
+                "reportTitle": report_title,
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt=prompt,
+        current_date="2026-07-29",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "query": query,
+        "fallback": "none",
+        "reportTitle": report_title,
+    }
+
+
+def test_current_turn_scope_masks_every_repeated_title_before_date_parsing() -> None:
+    report_title = "토요일 데일리스크럼"
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": "결정 이유와 발언",
+                "fallback": "none",
+                "reportTitle": report_title,
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt='"토요일 데일리스크럼"에서 결정 이유를 찾고 '
+        '"토요일 데일리스크럼"의 발언도 요약해줘',
+        current_date="2026-07-29",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    normalized_input = normalized.output_summary["input"]
+    assert normalized_input["fallback"] == "none"
+    assert normalized_input["reportTitle"] == report_title
+    assert normalized_input["query"] == "결정 이유를 찾고 발언도 요약해줘"
+    assert "from" not in normalized_input
+    assert "to" not in normalized_input
+
+
+def test_current_turn_scope_removes_title_grammar_from_lookup_query() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": '제목이 "배포 회의"인 회의록 찾아줘',
+                "reportTitle": "배포 회의",
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt='제목이 "온보딩 회의"인 회의록 말고 ' '제목이 "배포 회의"인 회의록 찾아줘',
+        current_date="2026-07-29",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "query": "배포 회의",
+        "reportTitle": "배포 회의",
+        "fallback": "none",
+    }
+
+
+@pytest.mark.parametrize(
+    ("report_title", "prompt"),
+    [
+        (
+            "월",
+            '제목이 "월"인 회의록에서 7월 17일 이후 결정사항 찾아줘',
+        ),
+        (
+            "월",
+            "제목이 월인 회의록에서 7월 17일 이후 결정사항 찾아줘",
+        ),
+        (
+            "2026",
+            '제목이 "2026"인 회의록에서 2026-07-17 이후 결정사항 찾아줘',
+        ),
+    ],
+)
+def test_current_turn_scope_preserves_date_containing_short_report_title(
+    report_title: str,
+    prompt: str,
+) -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": "결정사항",
+                "fallback": "none",
+                "reportTitle": report_title,
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt=prompt,
+        current_date="2026-07-29",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    normalized_input = normalized.output_summary["input"]
+    assert normalized_input["reportTitle"] == report_title
+    assert normalized_input["from"] == "2026-07-16T15:00:00.000Z"
+    assert "to" not in normalized_input
+
+
+def test_current_turn_scope_preserves_relative_date_matching_report_title() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": "다음주 월요일 결정사항",
+                "fallback": "none",
+                "reportTitle": "월요일",
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt='제목이 "월요일"인 회의록에서 다음주 월요일 결정사항 찾아줘',
+        current_date="2026-07-29",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    normalized_input = normalized.output_summary["input"]
+    assert normalized_input["reportTitle"] == "월요일"
+    assert normalized_input["query"] == "결정사항"
+    assert normalized_input["from"] == "2026-08-02T15:00:00.000Z"
+    assert normalized_input["to"] == "2026-08-03T15:00:00.000Z"
+
+
+@pytest.mark.parametrize(
+    ("prompt", "planner_title", "query"),
+    [
+        (
+            "2026년 7월 17일에 시작한 회의에서 AI 인식률 개선 담당자로 " "정해진 사람은 누구야?",
+            "2026년 7월 17일에 시작한 회의",
+            "AI 인식률 개선 담당자로 정해진 사람",
+        ),
+        (
+            "이번에는 이전 회의가 아니라 2026년 7월 17일 회의에서 "
+            "AI 인식률 개선 담당자만 알려줘.",
+            "이번에는 이전 회의가 아니라 2026년 7월 17일 회의",
+            "AI 인식률 개선 담당자",
+        ),
+        (
+            "제목은 '4분 설명 챌린지'를 사용하지 말고, 2026년 7월 17일에 "
+            "시작한 회의에서 AI 인식률 개선 담당자만 알려줘.",
+            "4분 설명 챌린지",
+            "AI 인식률 개선 담당자",
+        ),
+    ],
+)
+def test_current_turn_scope_rejects_date_description_as_report_title(
+    prompt: str,
+    planner_title: str,
+    query: str,
+) -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": query,
+                "fallback": "none",
+                "reportTitle": planner_title,
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt=prompt,
+        current_date="2026-07-29",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "query": query,
+        "fallback": "none",
+        "from": "2026-07-16T15:00:00.000Z",
+        "to": "2026-07-17T15:00:00.000Z",
+    }
+
+
+def test_current_turn_scope_does_not_promote_content_topic_to_report_title() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": "4분 설명 챌린지",
+                "fallback": "workspace_evidence",
+                "reportTitle": "4분 설명 챌린지",
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt=(
+            "4분 설명 챌린지와 관련된 발언이 있었던 회의를 내용으로 검색해줘. "
+            "정확한 제목이 없으면 내용 검색으로 전환했다고 알려줘."
+        ),
+        current_date="2026-07-29",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "query": "4분 설명 챌린지",
+        "fallback": "none",
+    }
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected_from", "expected_to"),
+    [
+        (
+            "이번주 토요일 회의록 보여줘",
+            "2026-07-31T15:00:00.000Z",
+            "2026-08-01T15:00:00.000Z",
+        ),
+        (
+            "지난주 토요일 회의록 보여줘",
+            "2026-07-24T15:00:00.000Z",
+            "2026-07-25T15:00:00.000Z",
+        ),
+    ],
+)
+def test_current_turn_scope_resolves_relative_weekday(
+    prompt: str,
+    expected_from: str,
+    expected_to: str,
+) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "from": {"type": "string"},
+                            "to": {"type": "string"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={},
+        ),
+        job,
+        prompt=prompt,
+        current_date="2026-07-29",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "from": expected_from,
+        "to": expected_to,
+    }
+
+
+def test_meeting_scope_trace_records_normalizer_changes_without_values() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": "AI 인식률 개선 담당자로 정해진 사람",
+                "fallback": "none",
+                "reportTitle": "2026년 7월 17일에 시작한 회의",
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt=(
+            "2026년 7월 17일에 시작한 회의에서 AI 인식률 개선 담당자로 " "정해진 사람은 누구야?"
+        ),
+        current_date="2026-07-29",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    trace = normalized.output_summary["meetingReportScopeTrace"]
+    assert trace == {
+        "plannerStatus": "tool_candidate",
+        "normalizedStatus": "tool_candidate",
+        "plannerToolName": "search_meeting_reports",
+        "normalizedToolName": "search_meeting_reports",
+        "plannerInputFields": ["fallback", "query", "reportTitle"],
+        "normalizedInputFields": ["fallback", "from", "query", "to"],
+        "preservedFields": ["fallback", "query"],
+        "addedFields": ["from", "to"],
+        "removedFields": ["reportTitle"],
+        "replacedFields": [],
+        "changes": [
+            {
+                "field": "from",
+                "action": "added",
+                "reason": "current_turn_date_resolution",
+            },
+            {
+                "field": "reportTitle",
+                "action": "removed",
+                "reason": "current_turn_title_validation",
+            },
+            {
+                "field": "to",
+                "action": "added",
+                "reason": "current_turn_date_resolution",
+            },
+        ],
+        "normalizationApplied": True,
+    }
+    serialized_trace = json.dumps(trace, ensure_ascii=False)
+    assert "2026년 7월 17일에 시작한 회의" not in serialized_trace
+    assert "AI 인식률 개선 담당자로 정해진 사람" not in serialized_trace
 
 
 def test_latest_completed_scope_keeps_status_and_latest_together() -> None:

@@ -36,11 +36,15 @@ export function createWorkspacePresenceMembershipRevocationHandler({
             await socket.leave(roomName);
           } catch {
             const disconnected = disconnectMembershipSocket(socket);
-            if (clearResult) emitWorkspacePresenceClearResult(io, clearResult);
+            if (clearResult) {
+              emitWorkspacePresenceClearResult(io.local, clearResult);
+            }
             return disconnected;
           }
 
-          if (clearResult) emitWorkspacePresenceClearResult(io, clearResult);
+          if (clearResult) {
+            emitWorkspacePresenceClearResult(io.local, clearResult);
+          }
           return true;
         }),
       );

@@ -35,6 +35,7 @@ import {
 import type { MeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
 import { MeetingReportWorkspaceLocationAdapter } from "@/features/meeting/meeting-workspace-location-adapter";
 import { createMeetingReportRequestGuard } from "@/features/meeting/meeting-workspace-location";
+import { createMeetingReportRefreshCoalescer } from "@/features/meeting/utils/meeting-report-refresh-coalescer";
 import type {
   MeetingReportActionItem,
   MeetingReportActionItemDeliveryInput,
@@ -81,7 +82,7 @@ type MeetingReportActivityEvidence = NonNullable<
   MeetingReportDetail["activityEvidence"]
 >[number];
 
-const REPORT_POLL_INTERVAL_MS = 10000;
+const REPORT_POLL_INTERVAL_MS = 30_000;
 const REPORT_STATUS_FILTERS: Array<{
   label: string;
   value: MeetingReportStatusFilter;
@@ -1903,6 +1904,9 @@ export function MeetingReportSection({
   const reportDetailRequestGuardRef = useRef(
     createMeetingReportRequestGuard()
   );
+  const realtimeReportRefreshCoalescerRef = useRef(
+    createMeetingReportRefreshCoalescer()
+  );
 
   const hasProcessingReport = reports.some((report) =>
     isReportInProgress(report.status)
@@ -2220,10 +2224,18 @@ export function MeetingReportSection({
 
   const handleRealtimeReportUpdated = useCallback(
     (event: MeetingReportRealtimeEvent) => {
-      void reloadReports();
-      if (selectedReportId === event.reportId) {
-        void loadReportDetail(selectedReportId, { silent: true });
-      }
+      void realtimeReportRefreshCoalescerRef.current.run(
+        event,
+        async () => {
+          const refreshes: Promise<unknown>[] = [reloadReports()];
+          if (selectedReportId === event.reportId) {
+            refreshes.push(
+              loadReportDetail(selectedReportId, { silent: true })
+            );
+          }
+          await Promise.allSettled(refreshes);
+        }
+      );
     },
     [loadReportDetail, reloadReports, selectedReportId]
   );

@@ -18,6 +18,11 @@ type PdfMembershipSocket = {
 };
 
 type PdfMembershipIo = {
+  local: {
+    to: (roomName: string) => {
+      emit: (event: string, payload: PdfCollaborationPresence) => unknown;
+    };
+  };
   sockets: {
     sockets: ReadonlyMap<string, PdfMembershipSocket>;
   };
@@ -58,7 +63,7 @@ export function createPdfCollaborationMembershipRevocationHandler({
               ),
             );
             for (const presence of removedPresence) {
-              io.to(createPdfCollaborationRoomName(presence)).emit(
+              io.local.to(createPdfCollaborationRoomName(presence)).emit(
                 pdfCollaborationServerEvents.leave,
                 presence,
               );

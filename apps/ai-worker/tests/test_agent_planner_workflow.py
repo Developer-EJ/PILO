@@ -73,7 +73,24 @@ def test_evaluation_workflow_supports_main_snapshot_without_comparison_gate() ->
     assert "agent-performance-snapshot-${{ needs.prepare.outputs.target_sha }}" in workflow
     assert "inputs.mode == 'snapshot'" in workflow
     assert "inputs.mode == 'compare'" in workflow
-    assert "agent-evaluation-target-multi_turn_context" in workflow
-    assert "target-meeting-multi_turn_context-evaluation.json" in workflow
+    assert "agent-evaluation-target-${{ needs.prepare.outputs.snapshot_scope }}" in workflow
+    assert "target-meeting-${SNAPSHOT_SCOPE}-evaluation.json" in workflow
     assert "inputs.target_sha || github.sha" in workflow
     assert "target SHA must match the current main revision" in workflow
+
+
+def test_snapshot_scope_can_run_agent_workflow_and_publish_summary() -> None:
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "snapshot_scope:" in workflow
+    assert "default: multi_turn_context" in workflow
+    assert "- agent_workflow" in workflow
+    assert "SNAPSHOT_SCOPE: ${{ inputs.snapshot_scope }}" in workflow
+    assert "echo 'variants=[\"agent_workflow\"]'" in workflow
+    assert "agent_workflow_catalog_v1.json" in workflow
+    assert "agent-workflow-catalog.json" in workflow
+    assert "matrix.variant == 'multi_turn_context'" in workflow
+    assert '--workflow-catalog "$RUNNER_TEMP/prepared/agent-workflow-catalog.json"' in workflow
+    assert "agent-evaluation-target-${{ needs.prepare.outputs.snapshot_scope }}" in workflow
+    assert "target-meeting-${SNAPSHOT_SCOPE}-evaluation.json" in workflow
+    assert '--summary-output "$GITHUB_STEP_SUMMARY"' in workflow
