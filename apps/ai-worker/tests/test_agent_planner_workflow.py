@@ -90,7 +90,10 @@ def test_snapshot_scope_can_run_agent_workflow_and_publish_summary() -> None:
     assert "agent_workflow_catalog_v1.json" in workflow
     assert "agent-workflow-catalog.json" in workflow
     assert "matrix.variant == 'multi_turn_context'" in workflow
-    assert '--workflow-catalog "$RUNNER_TEMP/prepared/agent-workflow-catalog.json"' in workflow
+    assert 'EVALUATION_VARIANT="multi_tool"' in workflow
+    assert 'EVALUATION_CATALOG="$RUNNER_TEMP/prepared/agent-workflow-catalog.json"' in workflow
+    assert '--meeting-catalog "$EVALUATION_CATALOG"' in workflow
+    assert '--meeting-variant "$EVALUATION_VARIANT"' in workflow
     assert "agent-evaluation-target-${{ needs.prepare.outputs.snapshot_scope }}" in workflow
     assert "target-meeting-${SNAPSHOT_SCOPE}-evaluation.json" in workflow
     assert '--summary-output "$GITHUB_STEP_SUMMARY"' in workflow
