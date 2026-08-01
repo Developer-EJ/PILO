@@ -53,29 +53,35 @@ def render_snapshot_summary(snapshot: dict[str, object]) -> str:
 def _render_agent_workflow_summary(snapshot: dict[str, object]) -> str:
     aggregate = _object(snapshot.get("aggregate"), "Missing aggregate metrics")
     safety = _object(snapshot.get("safetyViolations"), "Missing safety metrics")
+    revision = _string(snapshot.get("sourceRevision"), "Missing source revision")
+    scenario_count = _integer(snapshot.get("uniqueScenarioCount"), "Invalid scenario count")
     attempts = _integer(aggregate.get("attempts"), "Invalid attempt count")
-    passed_attempts = _integer(
-        aggregate.get("passedAttempts"), "Invalid passed attempt count"
-    )
+    passed_attempts = _integer(aggregate.get("passedAttempts"), "Invalid passed attempt count")
     contract_passes = _integer(
         aggregate.get("executionContractPassAttempts"),
         "Invalid execution contract pass count",
     )
+    task_success = _percent(snapshot.get("taskSuccessRate"))
+    contract_rate = _percent(snapshot.get("executionContractPassRate"))
+    tool_accuracy = _percent(aggregate.get("toolSelectionAccuracy"))
+    input_accuracy = _percent(aggregate.get("requiredInputAccuracy"))
+    safety_count = _integer(safety.get("count"), "Invalid safety violation count")
+    mean_latency = _number(snapshot.get("meanLatencyMs"), "Invalid mean latency")
     return "\n".join(
         (
             "## Agent Workflow Evaluation",
             "",
             "| Metric | Result |",
             "| --- | ---: |",
-            f"| Revision | `{_string(snapshot.get('sourceRevision'), 'Missing source revision')}` |",
-            f"| Scenarios | {_integer(snapshot.get('uniqueScenarioCount'), 'Invalid scenario count')} |",
+            f"| Revision | `{revision}` |",
+            f"| Scenarios | {scenario_count} |",
             f"| Attempts | {attempts} |",
-            f"| Task success | {passed_attempts} / {attempts} ({_percent(snapshot.get('taskSuccessRate'))}) |",
-            f"| Execution contract | {contract_passes} / {attempts} ({_percent(snapshot.get('executionContractPassRate'))}) |",
-            f"| Tool selection accuracy | {_percent(aggregate.get('toolSelectionAccuracy'))} |",
-            f"| Required-input accuracy | {_percent(aggregate.get('requiredInputAccuracy'))} |",
-            f"| Safety violations | {_integer(safety.get('count'), 'Invalid safety violation count')} |",
-            f"| Mean latency | {_number(snapshot.get('meanLatencyMs'), 'Invalid mean latency'):,.2f} ms |",
+            f"| Task success | {passed_attempts} / {attempts} ({task_success}) |",
+            f"| Execution contract | {contract_passes} / {attempts} ({contract_rate}) |",
+            f"| Tool selection accuracy | {tool_accuracy} |",
+            f"| Required-input accuracy | {input_accuracy} |",
+            f"| Safety violations | {safety_count} |",
+            f"| Mean latency | {mean_latency:,.2f} ms |",
         )
     )
 
@@ -83,21 +89,30 @@ def _render_agent_workflow_summary(snapshot: dict[str, object]) -> str:
 def _render_multiturn_summary(snapshot: dict[str, object]) -> str:
     metadata = _object(snapshot.get("metadata"), "Missing snapshot metadata")
     metrics = _object(snapshot.get("metrics"), "Missing multi-turn metrics")
+    revision = _string(metadata.get("sourceRevision"), "Missing source revision")
+    conversation_count = _integer(snapshot.get("conversationCount"), "Invalid conversation count")
+    task_success = _percent(metrics.get("koreanMultiTurnContextTaskSuccessRate"))
+    follow_up_tool = _percent(metrics.get("followUpToolSelectionAccuracy"))
+    context_argument = _percent(metrics.get("priorContextArgumentAccuracy"))
+    context_resolution = _percent(metrics.get("multiTurnContextResolutionRate"))
+    multi_turn_tool = _percent(metrics.get("multiTurnToolSelectionAccuracy"))
+    partial = _percent(metrics.get("partialRate"))
+    inconclusive = _percent(metrics.get("inconclusiveRate"))
     return "\n".join(
         (
             "## Korean Multi-turn Evaluation",
             "",
             "| Metric | Result |",
             "| --- | ---: |",
-            f"| Revision | `{_string(metadata.get('sourceRevision'), 'Missing source revision')}` |",
-            f"| Conversations | {_integer(snapshot.get('conversationCount'), 'Invalid conversation count')} |",
-            f"| Task success | {_percent(metrics.get('koreanMultiTurnContextTaskSuccessRate'))} |",
-            f"| Follow-up Tool selection | {_percent(metrics.get('followUpToolSelectionAccuracy'))} |",
-            f"| Prior-context argument accuracy | {_percent(metrics.get('priorContextArgumentAccuracy'))} |",
-            f"| Context resolution | {_percent(metrics.get('multiTurnContextResolutionRate'))} |",
-            f"| Multi-turn Tool selection | {_percent(metrics.get('multiTurnToolSelectionAccuracy'))} |",
-            f"| Partial | {_percent(metrics.get('partialRate'))} |",
-            f"| Inconclusive | {_percent(metrics.get('inconclusiveRate'))} |",
+            f"| Revision | `{revision}` |",
+            f"| Conversations | {conversation_count} |",
+            f"| Task success | {task_success} |",
+            f"| Follow-up Tool selection | {follow_up_tool} |",
+            f"| Prior-context argument accuracy | {context_argument} |",
+            f"| Context resolution | {context_resolution} |",
+            f"| Multi-turn Tool selection | {multi_turn_tool} |",
+            f"| Partial | {partial} |",
+            f"| Inconclusive | {inconclusive} |",
         )
     )
 

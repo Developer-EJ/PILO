@@ -10,6 +10,8 @@ from app.agent_planner_comparison import (
 )
 from scripts.snapshot_agent_planner_evaluations import (
     main as snapshot_main,
+)
+from scripts.snapshot_agent_planner_evaluations import (
     render_snapshot_summary,
 )
 
