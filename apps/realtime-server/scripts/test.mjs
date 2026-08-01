@@ -351,5 +351,6 @@ await import("../src/documents/document-checkpoint.service.test.mjs");
 await import("../src/documents/document-hocuspocus.service.test.mjs");
 await import("../src/documents/document-hocuspocus-transport.test.mjs");
 await import("../src/documents/document-route-contract.test.mjs");
+await import("../src/config/realtime-config.test.mjs");
 await import("../src/pdf-collaboration/pdf-collaboration-payload.test.mjs");
 await import("../src/pdf-collaboration/pdf-collaboration-room-state.test.mjs");
