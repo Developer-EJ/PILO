@@ -39,6 +39,12 @@ _REVISION_BINDING_KEYS = (
 )
 
 
+def reported_suite_version(suite_version: str, report_variant: str | None) -> str:
+    if report_variant is None:
+        return suite_version
+    return f"{suite_version.rsplit(':', 1)[0]}:{report_variant}"
+
+
 def build_multiturn_context_comparison(
     baseline_report: dict[str, object],
     candidate_report: dict[str, object],

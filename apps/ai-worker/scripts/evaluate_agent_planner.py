@@ -19,6 +19,7 @@ from app.agent_multiturn_context_evaluation import (
     load_multiturn_catalog,
 )
 from app.agent_outcome_judge import OpenAiMultiTurnJudge
+from app.agent_planner_comparison import reported_suite_version
 from app.agent_planner_evaluation import (
     attach_tool_capability_catalog,
     build_evaluation_input_hashes,
@@ -99,6 +100,10 @@ def main() -> None:
         ),
         default="canonical",
         help="Meeting regression prompt set to evaluate when --meeting-catalog is provided.",
+    )
+    parser.add_argument(
+        "--report-variant",
+        help="Public variant name recorded in the evaluation report.",
     )
     parser.add_argument("--current-date", required=True, help="Planner current date in YYYY-MM-DD.")
     parser.add_argument("--timezone", default="Asia/Seoul")
@@ -333,7 +338,7 @@ def main() -> None:
         "currentDate": args.current_date,
         "timezone": args.timezone,
         "repetitions": args.repetitions,
-        "suiteVersion": suite.version,
+        "suiteVersion": reported_suite_version(suite.version, args.report_variant),
         "toolSchemaVersion": suite.job.tool_schema_version,
         "shadowRetrieval": args.shadow_retrieval,
         "compareShadowRetrieval": args.compare_shadow_retrieval,
