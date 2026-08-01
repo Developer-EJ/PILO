@@ -200,3 +200,135 @@ test("waits for a peer lease before entering the checkpoint", async () => {
   assert.equal(attempts, 3);
   await sync.close();
 });
+
+test("bounds a checkpoint lock acquisition when Redis never answers", async () => {
+  const fake = createFakeClient({
+    async set() {
+      return new Promise(() => undefined);
+    },
+  });
+  const sync = await createDocumentRedisSync({
+    commandTimeoutMs: 5,
+    createCommandClient: () => fake.client,
+    createExtension: () => ({ async onDestroy() {} }),
+    enabled: true,
+    eventLogger() {},
+    instanceId: "realtime-b",
+    redisUrl: "redis://localhost",
+  });
+
+  await assert.rejects(
+    () => sync.checkpointCoordinator.runExclusive("document-1", async () => undefined),
+    /Redis checkpoint lock acquisition timed out/,
+  );
+  assert.equal(sync.status, "unavailable");
+  await sync.close();
+});
+
+test("rejects a checkpoint when lease renewal never answers", async () => {
+  const fake = createFakeClient({
+    async eval(script) {
+      if (script.includes("pexpire")) return new Promise(() => undefined);
+      return 1;
+    },
+  });
+  const sync = await createDocumentRedisSync({
+    commandTimeoutMs: 5,
+    createCommandClient: () => fake.client,
+    createExtension: () => ({ async onDestroy() {} }),
+    enabled: true,
+    eventLogger() {},
+    instanceId: "realtime-b",
+    leaseDurationMs: 9,
+    redisUrl: "redis://localhost",
+  });
+
+  await assert.rejects(
+    () =>
+      sync.checkpointCoordinator.runExclusive("document-1", async () => {
+        await new Promise((resolve) => setTimeout(resolve, 14));
+      }),
+    /Document checkpoint lock ownership lost/,
+  );
+  assert.equal(sync.status, "unavailable");
+  await sync.close();
+});
+
+test("rejects a checkpoint when a delayed renewal reports lost ownership", async () => {
+  const fake = createFakeClient({
+    async eval(script) {
+      if (script.includes("pexpire")) {
+        await new Promise((resolve) => setTimeout(resolve, 6));
+        return 0;
+      }
+      return 1;
+    },
+  });
+  const sync = await createDocumentRedisSync({
+    commandTimeoutMs: 20,
+    createCommandClient: () => fake.client,
+    createExtension: () => ({ async onDestroy() {} }),
+    enabled: true,
+    eventLogger() {},
+    instanceId: "realtime-b",
+    leaseDurationMs: 9,
+    redisUrl: "redis://localhost",
+  });
+
+  await assert.rejects(
+    () =>
+      sync.checkpointCoordinator.runExclusive("document-1", async () => {
+        await new Promise((resolve) => setTimeout(resolve, 12));
+      }),
+    /Document checkpoint lock ownership lost/,
+  );
+  await sync.close();
+});
+
+test("bounds checkpoint lease release when Redis never answers", async () => {
+  const fake = createFakeClient({
+    async eval(script) {
+      if (script.includes("del")) return new Promise(() => undefined);
+      return 1;
+    },
+  });
+  const sync = await createDocumentRedisSync({
+    commandTimeoutMs: 5,
+    createCommandClient: () => fake.client,
+    createExtension: () => ({ async onDestroy() {} }),
+    enabled: true,
+    eventLogger() {},
+    instanceId: "realtime-b",
+    redisUrl: "redis://localhost",
+  });
+
+  const result = await sync.checkpointCoordinator.runExclusive(
+    "document-1",
+    async () => "saved",
+  );
+
+  assert.equal(result, "saved");
+  assert.equal(sync.status, "unavailable");
+  await sync.close();
+});
+
+test("forces command client destruction when Redis quit never answers", async () => {
+  const fake = createFakeClient({
+    async quit() {
+      return new Promise(() => undefined);
+    },
+  });
+  const sync = await createDocumentRedisSync({
+    commandTimeoutMs: 5,
+    createCommandClient: () => fake.client,
+    createExtension: () => ({ async onDestroy() {} }),
+    enabled: true,
+    eventLogger() {},
+    instanceId: "realtime-b",
+    redisUrl: "redis://localhost",
+  });
+
+  await sync.close();
+
+  assert.equal(fake.calls.destroy, 1);
+});

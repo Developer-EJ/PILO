@@ -42,19 +42,19 @@
   "snapshotRequests": [
     {
       "expectedVersion": 0,
-      "instanceId": "realtime-b",
+      "instanceId": "realtime-a",
       "phase": "round-1",
       "status": 200
     },
     {
       "expectedVersion": 0,
-      "instanceId": "realtime-a",
+      "instanceId": "realtime-b",
       "phase": "round-1",
       "status": 409
     },
     {
       "expectedVersion": 1,
-      "instanceId": "realtime-a",
+      "instanceId": "realtime-b",
       "phase": "round-1",
       "status": 200
     }

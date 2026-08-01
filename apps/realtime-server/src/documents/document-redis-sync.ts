@@ -68,9 +68,14 @@ export type DocumentRedisSync = {
 };
 
 export async function createDocumentRedisSync({
+  commandTimeoutMs = 2_000,
   connectTimeoutMs = 5_000,
   createCommandClient = (url) =>
-    createClient({ url }) as unknown as RedisCommandClient,
+    createClient({
+      disableOfflineQueue: true,
+      socket: { connectTimeout: connectTimeoutMs },
+      url,
+    }) as unknown as RedisCommandClient,
   createExtension = (configuration) => new Redis(configuration),
   enabled,
   eventLogger,
@@ -80,6 +85,7 @@ export async function createDocumentRedisSync({
   maxLockWaitMs = 10_000,
   redisUrl,
 }: {
+  commandTimeoutMs?: number;
   connectTimeoutMs?: number;
   createCommandClient?: (url: string) => RedisCommandClient;
   createExtension?: (configuration: RedisExtensionConfiguration) => RedisExtension;
@@ -154,10 +160,20 @@ export async function createDocumentRedisSync({
       const token = randomUUID();
       const deadline = performance.now() + maxLockWaitMs;
       while (true) {
-        const acquired = await commandClient.set(leaseKey, token, {
-          NX: true,
-          PX: leaseDurationMs,
-        });
+        let acquired: string | null;
+        try {
+          acquired = await withTimeout(
+            commandClient.set(leaseKey, token, {
+              NX: true,
+              PX: leaseDurationMs,
+            }),
+            commandTimeoutMs,
+            "Redis checkpoint lock acquisition",
+          );
+        } catch (error) {
+          updateStatus("unavailable");
+          throw error;
+        }
         if (acquired === "OK") break;
         if (performance.now() >= deadline) {
           throw new Error("Document checkpoint lock acquisition timed out");
@@ -166,22 +182,30 @@ export async function createDocumentRedisSync({
       }
 
       let ownershipLost = false;
-      let renewalRunning = false;
-      const renew = async () => {
-        if (renewalRunning) return;
-        renewalRunning = true;
-        try {
-          const renewed = await commandClient.eval(renewLeaseScript, {
-            arguments: [token, String(leaseDurationMs)],
-            keys: [leaseKey],
-          });
-          if (Number(renewed) !== 1) ownershipLost = true;
-        } catch {
-          ownershipLost = true;
-          updateStatus("unavailable");
-        } finally {
-          renewalRunning = false;
-        }
+      let currentRenewal: Promise<void> | null = null;
+      const renew = () => {
+        if (currentRenewal) return currentRenewal;
+        const renewal = (async () => {
+          try {
+            const renewed = await withTimeout(
+              commandClient.eval(renewLeaseScript, {
+                arguments: [token, String(leaseDurationMs)],
+                keys: [leaseKey],
+              }),
+              commandTimeoutMs,
+              "Redis checkpoint lock renewal",
+            );
+            if (Number(renewed) !== 1) ownershipLost = true;
+          } catch {
+            ownershipLost = true;
+            updateStatus("unavailable");
+          }
+        })();
+        currentRenewal = renewal;
+        void renewal.finally(() => {
+          if (currentRenewal === renewal) currentRenewal = null;
+        });
+        return currentRenewal;
       };
       const renewalTimer = setInterval(
         () => void renew(),
@@ -191,6 +215,9 @@ export async function createDocumentRedisSync({
 
       try {
         const result = await work();
+        clearInterval(renewalTimer);
+        const renewalAtCompletion = currentRenewal;
+        if (renewalAtCompletion) await renewalAtCompletion;
         if (ownershipLost) {
           throw new Error("Document checkpoint lock ownership lost");
         }
@@ -198,10 +225,14 @@ export async function createDocumentRedisSync({
       } finally {
         clearInterval(renewalTimer);
         try {
-          await commandClient.eval(releaseLeaseScript, {
-            arguments: [token],
-            keys: [leaseKey],
-          });
+          await withTimeout(
+            commandClient.eval(releaseLeaseScript, {
+              arguments: [token],
+              keys: [leaseKey],
+            }),
+            commandTimeoutMs,
+            "Redis checkpoint lock release",
+          );
         } catch {
           updateStatus("unavailable");
         }
@@ -215,9 +246,17 @@ export async function createDocumentRedisSync({
     async close() {
       if (closed) return;
       closed = true;
-      await extension.onDestroy();
       try {
-        await commandClient.quit();
+        await withTimeout(
+          extension.onDestroy(),
+          commandTimeoutMs,
+          "Redis extension close",
+        );
+      } catch {
+        updateStatus("unavailable");
+      }
+      try {
+        await withTimeout(commandClient.quit(), commandTimeoutMs, "Redis quit");
       } catch {
         commandClient.destroy();
       }
@@ -240,7 +279,6 @@ async function withTimeout<T>(work: Promise<T>, timeoutMs: number, label: string
       work,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
-        timer.unref();
       }),
     ]);
   } finally {
