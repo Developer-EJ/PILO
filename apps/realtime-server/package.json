@@ -12,6 +12,8 @@
     "test:github-source-membership-revocation": "node src/github-source/github-source-membership-revocation.test.mjs",
     "test:page-cursor-membership-revocation": "node src/page-cursor/page-cursor-membership-revocation.test.mjs",
     "test:screen-share": "npm run build && node --test src/screen-share/screen-share-fan-out.test.mjs src/screen-share/screen-share-subscription.test.mjs",
+    "test:document-concurrency:e2e": "node scripts/document-checkpoint-concurrency.e2e.mjs",
+    "test:document-two-node:e2e": "node scripts/document-two-node-scaling.e2e.mjs",
     "test:workspace-presence": "node src/workspace-presence/workspace-presence.service.test.mjs && node src/workspace-presence/workspace-presence-socket-lifecycle.test.mjs"
   },
   "dependencies": {
@@ -27,6 +29,7 @@
     "yjs": "^13.6.31"
   },
   "devDependencies": {
+    "@hocuspocus/provider": "^4.4.0",
     "@types/node": "^26.1.0",
     "@types/ws": "^8.18.1",
     "socket.io-client": "^4.8.3",
