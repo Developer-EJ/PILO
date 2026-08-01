@@ -47,7 +47,7 @@ source of truth다. 초기 구독과 재연결에서는 이벤트를 기다리�
 | Header 현재 회의 상태 | 5초 `reloadCurrentMeeting()` | 제거 |
 | MeetingPanel 현재 회의·참여자 상태 | 5초 `reloadCurrentMeeting()`/`reloadParticipants()` | 제거 |
 | 녹음 경과 시간 표시 | 1초 타이머 | 유지 — 화면 표시용 타이머이며 서버 상태 polling이 아님 |
-| MeetingReport 상태 | 10초 fallback polling + Realtime 이벤트 | 유지 — 이 Issue 범위 밖 |
+| MeetingReport 상태 | 30초 fallback polling + Realtime 이벤트 | 유지 — 이 Issue 범위 밖 |
 | outbox/recovery worker sweep | 서버 내부 `setInterval` | 유지 — 브라우저 상태 polling이 아님 |
 
 ## 3. 확정할 계약 초안
@@ -240,9 +240,9 @@ type MeetingStateRedisEvent = MeetingStateRealtimeEvent & {
 
 - **권장: Header/MeetingPanel의 5초 "현재 회의 상태" polling만 제거한다.**
   - 사용자 요청인 방 존재·참여 상태 판별을 notification으로 전환한다.
-  - MeetingReport의 10초 fallback polling은 현재 at-most-once Realtime 계약의
+  - MeetingReport의 30초 fallback polling은 현재 at-most-once Realtime 계약의
     안전망이므로 그대로 둔다.
-- 대안: MeetingReport의 10초 fallback polling도 함께 제거한다.
+- 대안: MeetingReport의 30초 fallback polling도 함께 제거한다.
   - 이 경우 socket 미연결·event 유실 중 report 상태가 자동 갱신되지 않는 문제를
     별도 해결해야 하므로 #931의 범위를 넓힌다.
 

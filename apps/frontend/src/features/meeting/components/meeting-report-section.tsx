@@ -82,7 +82,7 @@ type MeetingReportActivityEvidence = NonNullable<
   MeetingReportDetail["activityEvidence"]
 >[number];
 
-const REPORT_POLL_INTERVAL_MS = 10000;
+const REPORT_POLL_INTERVAL_MS = 30_000;
 const REPORT_STATUS_FILTERS: Array<{
   label: string;
   value: MeetingReportStatusFilter;
