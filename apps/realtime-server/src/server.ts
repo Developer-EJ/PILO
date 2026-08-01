@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import type { Duplex } from "node:stream";
 import { WebSocketServer } from "ws";
 
 import { createRealtimeSessionService } from "./auth/session.service";
@@ -11,12 +12,19 @@ import { createDocumentHocuspocusService } from "./documents/document-hocuspocus
 import { createDocumentHocuspocusTransport } from "./documents/document-hocuspocus-transport";
 import { createDocumentMembershipRevocationHandler } from "./documents/document-membership-revocation";
 import { createDocumentEventLogger } from "./documents/document-observability";
+import { createDocumentRedisSync } from "./documents/document-redis-sync";
 import { createRealtimeSocketServer } from "./socket/socket-server";
 
 async function bootstrap() {
   const config = loadRealtimeServerConfig();
   const eventLogger = createDocumentEventLogger({
     instanceId: config.realtimeInstanceId,
+  });
+  const documentRedisSync = createDocumentRedisSync({
+    enabled: config.documentRedisSyncEnabled,
+    eventLogger,
+    instanceId: config.realtimeInstanceId,
+    redisUrl: config.redisUrl,
   });
   const database = createRealtimeDatabase({
     databaseApplicationName: config.databaseApplicationName,
@@ -71,8 +79,11 @@ async function bootstrap() {
     checkpointService: createDocumentCheckpointService({
       client: createDocumentAppServerClient({ appServerUrl: config.appServerUrl }),
       eventLogger,
+      refreshBeforeStore: config.documentRedisSyncEnabled,
     }),
     eventLogger,
+    extensions: documentRedisSync.extensions,
+    instanceId: config.realtimeInstanceId,
     sessionService: createRealtimeSessionService(database),
   });
   const documentHocuspocus = documentHocuspocusService.hocuspocus;
@@ -90,6 +101,7 @@ async function bootstrap() {
     documentHocuspocus,
   );
   const websocketServer = new WebSocketServer({ noServer: true });
+  const documentUpgradeSockets = new Set<Duplex>();
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(
@@ -102,6 +114,8 @@ async function bootstrap() {
     }
 
     if (url.pathname === "/sync/documents") {
+      documentUpgradeSockets.add(socket);
+      socket.once("close", () => documentUpgradeSockets.delete(socket));
       void documentHocuspocusTransport
         .handleUpgrade(request, socket, head)
         .catch((error) => {
@@ -163,7 +177,18 @@ async function bootstrap() {
     isShuttingDown = true;
 
     try {
+      await documentHocuspocusService.shutdown();
+      await documentRedisSync.close();
+      for (const socket of documentUpgradeSockets) {
+        socket.destroy();
+      }
+      documentUpgradeSockets.clear();
+      await socketServer.close();
       const closeHttpServer = new Promise<void>((resolve, reject) => {
+        if (!server.listening) {
+          resolve();
+          return;
+        }
         server.close((error) => {
           if (error) {
             reject(error);
@@ -172,8 +197,6 @@ async function bootstrap() {
           resolve();
         });
       });
-      await documentHocuspocusService.shutdown();
-      await socketServer.close();
       await closeHttpServer;
       process.exit(0);
     } catch (error) {
@@ -184,6 +207,11 @@ async function bootstrap() {
 
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
+  process.on("message", (message) => {
+    if (message === "pilo:graceful-shutdown") {
+      void shutdown();
+    }
+  });
 }
 
 void bootstrap().catch((error) => {

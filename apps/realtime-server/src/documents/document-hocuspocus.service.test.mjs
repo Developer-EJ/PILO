@@ -176,3 +176,72 @@ test("reports authenticated document rooms without token or user identity", asyn
   assert.equal(JSON.stringify(events).includes("private-token"), false);
   assert.equal(JSON.stringify(events).includes("private-user"), false);
 });
+
+test("registers the instance name and document Redis extension", () => {
+  const extension = { priority: 1000 };
+  const service = createDocumentHocuspocusService({
+    accessService: {
+      async getDocumentRoomAccess() {
+        return { readOnly: false };
+      },
+    },
+    checkpointService: {
+      async loadDocument() {
+        return new Uint8Array();
+      },
+      async storeDocument() {},
+    },
+    extensions: [extension],
+    instanceId: "realtime-a",
+    sessionService: {
+      async validateSessionToken() {
+        return { displayName: "PILO", userId: "user-1" };
+      },
+    },
+  });
+
+  assert.equal(service.hocuspocus.configuration.name, "realtime-a");
+  assert.ok(service.hocuspocus.configuration.extensions.includes(extension));
+});
+
+test("shutdown waits for checkpoint drain after flushing pending stores", async () => {
+  let releaseDrain;
+  const drainBlocked = new Promise((resolve) => {
+    releaseDrain = resolve;
+  });
+  let drainCalls = 0;
+  const service = createDocumentHocuspocusService({
+    accessService: {
+      async getDocumentRoomAccess() {
+        return { readOnly: false };
+      },
+    },
+    checkpointService: {
+      async drain() {
+        drainCalls += 1;
+        await drainBlocked;
+      },
+      async loadDocument() {
+        return new Uint8Array();
+      },
+      async storeDocument() {},
+    },
+    sessionService: {
+      async validateSessionToken() {
+        return { displayName: "PILO", userId: "user-1" };
+      },
+    },
+  });
+
+  let shutdownFinished = false;
+  const shutdown = service.shutdown().then(() => {
+    shutdownFinished = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(drainCalls, 1);
+  assert.equal(shutdownFinished, false);
+  releaseDrain();
+  await shutdown;
+  assert.equal(shutdownFinished, true);
+});

@@ -209,6 +209,7 @@ async function runRound(principal, round) {
     } finally {
       reconnected.provider.destroy();
     }
+    await waitForRoomsUnloaded(`round ${round} unload`);
 
     const phaseMetrics = metrics.filter((item) => item.phase === `round-${round}`);
     return {
@@ -223,6 +224,15 @@ async function runRound(principal, round) {
   } finally {
     clients.forEach(({ provider }) => provider.destroy());
   }
+}
+
+async function waitForRoomsUnloaded(label) {
+  await waitUntil(async () => {
+    const health = await Promise.all(
+      nodeDefinitions.map((node) => fetch(`${node.httpUrl}/health`).then((response) => response.json())),
+    );
+    return health.every((payload) => payload.sync?.documents?.roomCount === 0);
+  }, label);
 }
 
 async function runGracefulHandoff(principal, round) {
@@ -413,7 +423,7 @@ function startRealtimeServer(node) {
       REALTIME_INSTANCE_ID: node.id,
       REDIS_URL,
     },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
     windowsHide: true,
   });
   state.process = child;
@@ -442,7 +452,11 @@ function captureDocumentEvent(line) {
 async function stopRealtimeServer(instanceId) {
   const state = realtimeProcesses.get(instanceId);
   if (!state || state.process.exitCode !== null) return;
-  state.process.kill("SIGTERM");
+  if (state.process.connected) {
+    state.process.send("pilo:graceful-shutdown");
+  } else {
+    state.process.kill("SIGTERM");
+  }
   await withTimeout(
     new Promise((resolvePromise) => state.process.once("exit", resolvePromise)),
     10_000,
@@ -583,11 +597,16 @@ try {
   }
   process.exitCode = 1;
 } finally {
+  console.log("TWO_NODE_E2E_CLEANUP=stopping_realtime");
   await Promise.all(
     [...realtimeProcesses.keys()].map((instanceId) =>
       stopRealtimeServer(instanceId).catch(() => undefined),
     ),
   );
+  console.log("TWO_NODE_E2E_CLEANUP=closing_proxy");
   await closeServer(proxy).catch(() => undefined);
+  console.log("TWO_NODE_E2E_CLEANUP=closing_database");
   await pool.end();
+  console.log("TWO_NODE_E2E_CLEANUP=complete");
+  process.exit(process.exitCode ?? 0);
 }
