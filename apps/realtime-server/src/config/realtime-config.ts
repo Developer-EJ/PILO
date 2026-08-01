@@ -1,3 +1,5 @@
+import { hostname } from "node:os";
+
 export type RealtimeServerConfig = {
   appServerUrl: string;
   canvasActivityToken: string | null;
@@ -8,7 +10,9 @@ export type RealtimeServerConfig = {
   databasePoolMax: number;
   databaseSsl: boolean;
   databaseUrl: string;
+  documentRedisSyncEnabled: boolean;
   port: number;
+  realtimeInstanceId: string;
   redisUrl: string | null;
   scope: string;
 };
@@ -38,6 +42,16 @@ function parseCorsOrigin(value: string | undefined) {
 export function loadRealtimeServerConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): RealtimeServerConfig {
+  const redisUrl = env.REDIS_URL?.trim() || null;
+  const documentRedisSyncEnabled = env.DOCUMENT_REDIS_SYNC_ENABLED === "true";
+
+  if (documentRedisSyncEnabled && !redisUrl) {
+    throw new Error("DOCUMENT_REDIS_SYNC_ENABLED requires REDIS_URL");
+  }
+  if (documentRedisSyncEnabled && redisUrl) {
+    validateRedisUrl(redisUrl);
+  }
+
   return {
     appServerUrl: normalizeAppServerBaseUrl(
       env.APP_SERVER_URL?.trim() ||
@@ -65,10 +79,25 @@ export function loadRealtimeServerConfig(
     ),
     databaseSsl: env.DATABASE_SSL === "true",
     databaseUrl: env.DATABASE_URL ?? DEFAULT_DATABASE_URL,
+    documentRedisSyncEnabled,
     port: Number.parseInt(env.PORT ?? "3001", 10),
-    redisUrl: env.REDIS_URL ?? null,
+    realtimeInstanceId: env.REALTIME_INSTANCE_ID?.trim() || hostname(),
+    redisUrl,
     scope: env.REALTIME_SCOPE ?? "notifications_status_only",
   };
+}
+
+function validateRedisUrl(redisUrl: string) {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(redisUrl);
+  } catch {
+    throw new Error("REDIS_URL must use redis: or rediss:");
+  }
+
+  if (parsedUrl.protocol !== "redis:" && parsedUrl.protocol !== "rediss:") {
+    throw new Error("REDIS_URL must use redis: or rediss:");
+  }
 }
 
 function normalizeAppServerBaseUrl(appServerUrl: string) {
