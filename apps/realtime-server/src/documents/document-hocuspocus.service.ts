@@ -4,6 +4,7 @@ import type { RealtimeSessionService } from "../auth/session.service";
 import type { DocumentAccessService } from "./document-access.service";
 import type { DocumentCheckpointService } from "./document-checkpoint.service";
 import type { DocumentHocuspocusInstance } from "./document-hocuspocus-transport";
+import type { DocumentEventLogger } from "./document-observability";
 import type { DocumentRoomRef } from "./document-types";
 
 type HocuspocusDocumentConnection = {
@@ -68,10 +69,12 @@ export type DocumentHocuspocusService = {
 export function createDocumentHocuspocusService({
   accessService,
   checkpointService,
+  eventLogger = () => undefined,
   sessionService,
 }: {
   accessService: DocumentAccessService;
   checkpointService: DocumentCheckpointService;
+  eventLogger?: DocumentEventLogger;
   sessionService: RealtimeSessionService;
 }): DocumentHocuspocusService {
   const shutdownWaiters = new Set<() => void>();
@@ -105,6 +108,12 @@ export function createDocumentHocuspocusService({
     if (!access) {
       throw new Error("FORBIDDEN");
     }
+
+    eventLogger({
+      documentId: room.documentId,
+      event: "document_room_authenticated",
+      workspaceId: room.workspaceId,
+    });
 
     return { ...room, accessToken: token, userId: session.userId };
   }
