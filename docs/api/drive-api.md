@@ -449,12 +449,12 @@ wss://{realtime-origin}/sync/documents
 - provider의 document name은 `workspace:{workspaceId}:document:{documentId}:yjs` 형식이며, bearer token은 Hocuspocus 인증 메시지로 보낸다. URL query에 access token을 넣지 않는다.
 - realtime-server는 Hocuspocus 인증 hook에서 bearer session, Workspace membership, 삭제되지 않은 `document` Drive item을 검증한다.
 - Workspace `owner`, `member`는 연결과 편집이 가능하다. 인증되지 않았거나 권한이 없거나 삭제된 문서는 연결을 거부한다.
-- realtime-server는 room을 만들 때 기존 문서 조회 API로 최신 snapshot을 복원하고, Hocuspocus `onStoreDocument`의 `1초` debounce와 room mutex를 이용해 최신 병합 상태를 기존 snapshot 저장 API에 checkpoint한다. raw Yjs update는 1차 MVP에서 `document_yjs_updates`에 저장하지 않는다.
+- realtime-server는 room을 만들 때 기존 문서 조회 API로 최신 snapshot을 복원하고, Hocuspocus `onStoreDocument`의 `1초` debounce를 이용해 최신 병합 상태를 기존 snapshot 저장 API에 checkpoint한다. 여러 Realtime Server가 같은 room을 처리할 때는 Redis로 Yjs update를 동기화하고 분산 store lock 안에서 App Server의 최신 snapshot/version을 다시 확인해 문서별 checkpoint를 직렬화한다. raw Yjs update는 1차 MVP에서 `document_yjs_updates`에 저장하지 않는다.
 - checkpoint 호출에는 Hocuspocus 인증 context의 bearer token을 메모리에서만 사용한다. token은 DB, Activity Log, metadata에 저장하지 않는다.
 - realtime URL과 bearer token이 설정된 browser는 Yjs sync/awareness만 수행하며 snapshot 저장 API를 직접 호출하지 않는다. realtime transport를 설정하지 않은 로컬/장애 fallback에서만 browser가 기존 `1초` debounce autosave와 unmount flush를 수행한다.
-- server checkpoint가 `409 CONFLICT`이면 최신 snapshot을 room Y.Doc에 병합하고 한 번만 재시도한다. 두 번째 충돌이나 네트워크 오류는 Hocuspocus 저장 실패로 남기며 browser가 저장 경쟁에 참여하지 않는다.
-- 마지막 연결이 종료되면 `unloadImmediately`가 보류 checkpoint를 즉시 실행하고, realtime-server 종료 시에도 pending checkpoint를 flush한다. 마지막 checkpoint 뒤 최대 `1초`의 편집은 유실될 수 있다.
-- document room은 현재 realtime-server process 메모리에 있다. multiple realtime task 배포 전에는 한 task로 운영하거나 load balancer가 `/sync/documents` WebSocket을 sticky routing해야 한다.
+- server checkpoint가 `409 CONFLICT`이면 최신 snapshot을 room Y.Doc에 병합하고 한 번만 재시도한다. 이 경로는 Redis 조정 이후에도 방어 수단으로 유지하며, 두 번째 충돌이나 네트워크 오류는 저장 실패로 남긴다.
+- 마지막 연결이 종료되면 `unloadImmediately`가 보류 checkpoint를 즉시 실행하고, 정상 종료 시에는 pending store와 실행 중 checkpoint를 모두 drain한 뒤 연결을 닫는다. 강제 종료(SIGKILL, 인스턴스 장애)는 마지막 `1초` debounce 구간의 RPO 0을 보장하지 않는다.
+- 각 task의 document room은 메모리에 존재하지만 Redis extension이 Yjs sync/awareness를 task 간 전달한다. `DOCUMENT_REDIS_SYNC_ENABLED=true`인 다중 task 배포에서는 sticky routing을 정확성 조건으로 요구하지 않는다.
 
 ## Upload URL 발급
 

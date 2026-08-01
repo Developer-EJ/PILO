@@ -115,6 +115,27 @@ assert.match(server, /getCanvasRoomStateStats/);
 assert.match(server, /pathname\.startsWith\("\/ws\/"\)/);
 assert.match(server, /pathname\.startsWith\("\/socket\.io\/"\)/);
 assert.match(server, /type: "ready"/);
+assert.match(server, /createDocumentEventLogger/);
+assert.match(server, /createDocumentRedisSync/);
+assert.match(server, /instanceId: config\.realtimeInstanceId/);
+assert.match(server, /eventLogger/);
+assert.match(server, /extensions: documentRedisSync\.extensions/);
+assert.match(server, /refreshBeforeStore: config\.documentRedisSyncEnabled/);
+assert.match(server, /await documentRedisSync\.close\(\)/);
+assert.match(server, /redisSync: \{/);
+assert.match(server, /enabled: config\.documentRedisSyncEnabled/);
+assert.match(server, /status: documentRedisSync\.status/);
+assert.match(server, /process\.on\("message"/);
+assert.match(server, /pilo:graceful-shutdown/);
+assert.match(server, /const documentUpgradeSockets = new Set/);
+assert.match(server, /documentUpgradeSockets\.add\(socket\)/);
+assert.match(server, /for \(const socket of documentUpgradeSockets\)/);
+assert.match(server, /socket\.destroy\(\)/);
+assert.ok(
+  server.indexOf("for (const socket of documentUpgradeSockets)") <
+    server.indexOf("await socketServer.close()"),
+  "document upgrade sockets must be destroyed after checkpoint drain and before Socket.IO closes",
+);
 
 assert.match(rootReadme, /Common realtime code belongs/);
 assert.match(rootReadme, /DATABASE_URL/);
@@ -364,5 +385,8 @@ await import("../src/documents/document-checkpoint.service.test.mjs");
 await import("../src/documents/document-hocuspocus.service.test.mjs");
 await import("../src/documents/document-hocuspocus-transport.test.mjs");
 await import("../src/documents/document-route-contract.test.mjs");
+await import("../src/documents/document-observability.test.mjs");
+await import("../src/documents/document-redis-sync.test.mjs");
+await import("../src/config/realtime-config.test.mjs");
 await import("../src/pdf-collaboration/pdf-collaboration-payload.test.mjs");
 await import("../src/pdf-collaboration/pdf-collaboration-room-state.test.mjs");

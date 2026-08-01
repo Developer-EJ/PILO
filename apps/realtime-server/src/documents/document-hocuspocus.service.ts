@@ -4,6 +4,7 @@ import type { RealtimeSessionService } from "../auth/session.service";
 import type { DocumentAccessService } from "./document-access.service";
 import type { DocumentCheckpointService } from "./document-checkpoint.service";
 import type { DocumentHocuspocusInstance } from "./document-hocuspocus-transport";
+import type { DocumentEventLogger } from "./document-observability";
 import type { DocumentRoomRef } from "./document-types";
 
 type HocuspocusDocumentConnection = {
@@ -21,6 +22,9 @@ type HocuspocusDocumentServer = DocumentHocuspocusInstance & {
   flushPendingStores: () => void;
   getConnectionsCount: () => number;
   getDocumentsCount: () => number;
+  unloadDocument: (
+    document: HocuspocusDocumentConnectionStore,
+  ) => Promise<unknown>;
 };
 
 type HocuspocusDocument = Parameters<
@@ -39,6 +43,8 @@ type HocuspocusConstructor = new <Context>(configuration: {
   }) => Promise<void>;
   afterUnloadDocument: () => void;
   debounce: number;
+  extensions: readonly unknown[];
+  name: string;
   unloadImmediately: boolean;
 }) => HocuspocusDocumentServer;
 
@@ -68,11 +74,19 @@ export type DocumentHocuspocusService = {
 export function createDocumentHocuspocusService({
   accessService,
   checkpointService,
+  eventLogger = () => undefined,
+  extensions = [],
+  instanceId = "pilo-realtime-server",
   sessionService,
+  shutdownTimeoutMs = 40_000,
 }: {
   accessService: DocumentAccessService;
   checkpointService: DocumentCheckpointService;
+  eventLogger?: DocumentEventLogger;
+  extensions?: readonly unknown[];
+  instanceId?: string;
   sessionService: RealtimeSessionService;
+  shutdownTimeoutMs?: number;
 }): DocumentHocuspocusService {
   const shutdownWaiters = new Set<() => void>();
 
@@ -106,6 +120,12 @@ export function createDocumentHocuspocusService({
       throw new Error("FORBIDDEN");
     }
 
+    eventLogger({
+      documentId: room.documentId,
+      event: "document_room_authenticated",
+      workspaceId: room.workspaceId,
+    });
+
     return { ...room, accessToken: token, userId: session.userId };
   }
 
@@ -138,23 +158,77 @@ export function createDocumentHocuspocusService({
       resolveShutdownWaiters(hocuspocus);
     },
     debounce: 1_000,
+    extensions,
+    name: instanceId,
     unloadImmediately: true,
   });
 
   async function shutdown() {
-    if (hocuspocus.getDocumentsCount() === 0) {
-      return;
-    }
+    const deadline = performance.now() + shutdownTimeoutMs;
+    hocuspocus.closeConnections();
+    hocuspocus.flushPendingStores();
+    await withinShutdownBudget(
+      checkpointService.drain({ timeoutMs: remainingShutdownMs(deadline) }),
+      deadline,
+      "checkpoint drain",
+    );
 
-    await new Promise<void>((resolve) => {
-      shutdownWaiters.add(resolve);
-      hocuspocus.closeConnections();
-      hocuspocus.flushPendingStores();
-      resolveShutdownWaiters(hocuspocus);
-    });
+    await withinShutdownBudget(
+      Promise.all(
+        [...hocuspocus.documents.values()].map((document) =>
+          hocuspocus.unloadDocument(document),
+        ),
+      ),
+      deadline,
+      "document unload",
+    );
+
+    if (hocuspocus.getDocumentsCount() !== 0) {
+      let resolveWaiter: (() => void) | undefined;
+      const unloaded = new Promise<void>((resolve) => {
+        resolveWaiter = resolve;
+        shutdownWaiters.add(resolve);
+        resolveShutdownWaiters(hocuspocus);
+      });
+      try {
+        await withinShutdownBudget(unloaded, deadline, "document unload");
+      } finally {
+        if (resolveWaiter) shutdownWaiters.delete(resolveWaiter);
+      }
+    }
+    await withinShutdownBudget(
+      checkpointService.drain({ timeoutMs: remainingShutdownMs(deadline) }),
+      deadline,
+      "final checkpoint drain",
+    );
   }
 
   return { authorizeDocument, hocuspocus, loadDocument, shutdown, storeDocument };
+}
+
+function remainingShutdownMs(deadline: number) {
+  return Math.max(1, Math.ceil(deadline - performance.now()));
+}
+
+async function withinShutdownBudget<T>(
+  work: Promise<T>,
+  deadline: number,
+  phase: string,
+) {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Document shutdown timed out during ${phase}`)),
+          remainingShutdownMs(deadline),
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function parseDocumentRoomName(documentName: string): DocumentRoomRef | null {

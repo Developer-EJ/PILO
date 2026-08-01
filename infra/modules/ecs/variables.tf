@@ -25,16 +25,17 @@ variable "log_retention_in_days" {
 
 variable "services" {
   type = map(object({
-    image              = string
-    cpu                = number
-    memory             = number
-    desired_count      = number
-    container_port     = optional(number)
-    security_group_ids = list(string)
-    task_role_arn      = string
-    target_group_arn   = optional(string)
-    command            = optional(list(string))
-    environment        = map(string)
-    secrets            = map(string)
+    image                = string
+    cpu                  = number
+    memory               = number
+    desired_count        = number
+    container_port       = optional(number)
+    security_group_ids   = list(string)
+    task_role_arn        = string
+    target_group_arn     = optional(string)
+    stop_timeout_seconds = optional(number, 30)
+    command              = optional(list(string))
+    environment          = map(string)
+    secrets              = map(string)
   }))
 }

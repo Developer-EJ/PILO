@@ -27,10 +27,11 @@ resource "aws_ecs_task_definition" "service" {
 
   container_definitions = jsonencode([
     {
-      name      = each.key
-      image     = each.value.image
-      essential = true
-      command   = each.value.command
+      name        = each.key
+      image       = each.value.image
+      essential   = true
+      command     = each.value.command
+      stopTimeout = each.value.stop_timeout_seconds
 
       portMappings = each.value.container_port == null ? [] : [
         {
