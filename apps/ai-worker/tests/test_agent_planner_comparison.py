@@ -8,7 +8,12 @@ from app.agent_planner_comparison import (
     build_multiturn_context_snapshot,
     build_two_stage_comparison,
 )
-from scripts.snapshot_agent_planner_evaluations import main as snapshot_main
+from scripts.snapshot_agent_planner_evaluations import (
+    main as snapshot_main,
+)
+from scripts.snapshot_agent_planner_evaluations import (
+    render_snapshot_summary,
+)
 
 
 def report(
@@ -321,6 +326,7 @@ def test_snapshot_command_writes_metrics_without_a_pass_fail_gate(
 ) -> None:
     report_path = tmp_path / "agent-workflow.json"
     output_path = tmp_path / "snapshot.json"
+    summary_path = tmp_path / "summary.md"
     report_path.write_text(
         json.dumps(
             workflow_report(
@@ -342,6 +348,8 @@ def test_snapshot_command_writes_metrics_without_a_pass_fail_gate(
             str(report_path),
             "--output",
             str(output_path),
+            "--summary-output",
+            str(summary_path),
         ],
     )
 
@@ -349,6 +357,65 @@ def test_snapshot_command_writes_metrics_without_a_pass_fail_gate(
     snapshot = json.loads(output_path.read_text(encoding="utf-8"))
     assert snapshot["taskSuccessRate"] == 1.0
     assert "passed" not in snapshot
+    assert "Agent Workflow Evaluation" in summary_path.read_text(encoding="utf-8")
+
+
+def test_agent_workflow_snapshot_summary_reports_quality_metrics() -> None:
+    snapshot = build_agent_performance_snapshot(
+        [
+            workflow_report(
+                31,
+                source_revision="main-revision",
+                latency_ms=6333.9853,
+                provider_tokens=456,
+                variant="agent_workflow",
+                case_count=31,
+            )
+        ]
+    )
+    snapshot["aggregate"].update(
+        {
+            "attempts": 155,
+            "passedAttempts": 19,
+            "toolSelectionAccuracy": 0.7355,
+            "requiredInputAccuracy": 0.4387,
+        }
+    )
+    snapshot.update(
+        {
+            "taskSuccessRate": 0.1226,
+            "executionContractPassRate": 0.1226,
+            "safetyViolations": {"count": 25},
+        }
+    )
+
+    summary = render_snapshot_summary(snapshot)
+
+    assert "Agent Workflow Evaluation" in summary
+    assert "19 / 155" in summary
+    assert "12.26%" in summary
+    assert "73.55%" in summary
+    assert "43.87%" in summary
+    assert "25" in summary
+    assert "6,333.99 ms" in summary
+
+
+def test_multiturn_snapshot_summary_reports_context_metrics() -> None:
+    snapshot = build_multiturn_context_snapshot(multiturn_report())
+    snapshot["metadata"]["sourceRevision"] = "main-revision"
+
+    summary = render_snapshot_summary(snapshot)
+
+    assert "Korean Multi-turn Evaluation" in summary
+    assert "Conversations | 1" in summary
+    assert "Task success | 0.00%" in summary
+    assert "Prior-context argument accuracy | 100.00%" in summary
+    assert "Context resolution | 50.00%" in summary
+
+
+def test_snapshot_summary_rejects_unsupported_format() -> None:
+    with pytest.raises(ValueError, match="Unsupported evaluation snapshot format"):
+        render_snapshot_summary({"format": "unknown"})
 
 
 @pytest.mark.parametrize("mutation", ("missing_workflow_summary", "thirty_cases"))
