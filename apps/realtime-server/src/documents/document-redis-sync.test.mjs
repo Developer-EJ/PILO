@@ -35,6 +35,42 @@ function createFakeClient(overrides = {}) {
   return { calls, client, emit: (event) => listeners.get(event)?.() };
 }
 
+function createFakeTransport(initialStatus = "ready") {
+  const listeners = new Map();
+  return {
+    client: {
+      status: initialStatus,
+      on(event, listener) {
+        const eventListeners = listeners.get(event) ?? [];
+        eventListeners.push(listener);
+        listeners.set(event, eventListeners);
+      },
+    },
+    emit(event) {
+      if (event === "ready") this.client.status = "ready";
+      if (["close", "end", "error", "reconnecting"].includes(event)) {
+        this.client.status = "reconnecting";
+      }
+      for (const listener of listeners.get(event) ?? []) listener();
+    },
+  };
+}
+
+function createFakeExtension(overrides = {}) {
+  const pub = createFakeTransport();
+  const sub = createFakeTransport();
+  return {
+    extension: {
+      async onDestroy() {},
+      pub: pub.client,
+      sub: sub.client,
+      ...overrides,
+    },
+    pub,
+    sub,
+  };
+}
+
 test("returns no Redis resources when document sync is disabled", async () => {
   let createCalls = 0;
   const sync = await createDocumentRedisSync({
@@ -60,14 +96,14 @@ test("probes Redis before reporting ready and creates the sync extension", async
   const events = [];
   let destroyCalls = 0;
   const fake = createFakeClient();
-  const extension = {
+  const { extension } = createFakeExtension({
     async onDestroy() {
       destroyCalls += 1;
     },
     async onStoreDocument() {
       throw new Error("official non-renewing store lock must be replaced");
     },
-  };
+  });
   const sync = await createDocumentRedisSync({
     createCommandClient: () => fake.client,
     createExtension(configuration) {
@@ -106,6 +142,88 @@ test("probes Redis before reporting ready and creates the sync extension", async
   assert.equal(fake.calls.quit, 1);
 });
 
+test("waits for both Yjs Redis pub/sub transports before reporting ready", async () => {
+  const fake = createFakeClient();
+  const pub = createFakeTransport("connecting");
+  const sub = createFakeTransport("connecting");
+  const extension = {
+    async onDestroy() {},
+    pub: pub.client,
+    sub: sub.client,
+  };
+  let settled = false;
+  const creating = createDocumentRedisSync({
+    connectTimeoutMs: 100,
+    createCommandClient: () => fake.client,
+    createExtension: () => extension,
+    enabled: true,
+    eventLogger() {},
+    instanceId: "realtime-pub-sub",
+    redisUrl: "redis://localhost",
+  }).then((sync) => {
+    settled = true;
+    return sync;
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  pub.emit("ready");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  sub.emit("ready");
+
+  const sync = await creating;
+  assert.equal(sync.status, "ready");
+  await sync.close();
+});
+
+test("marks Redis sync unavailable when Yjs pub/sub reconnects", async () => {
+  const fake = createFakeClient();
+  const extension = createFakeExtension();
+  const sync = await createDocumentRedisSync({
+    createCommandClient: () => fake.client,
+    createExtension: () => extension.extension,
+    enabled: true,
+    eventLogger() {},
+    instanceId: "realtime-pub-sub",
+    redisUrl: "redis://localhost",
+  });
+
+  extension.sub.emit("reconnecting");
+  assert.equal(sync.status, "unavailable");
+  extension.sub.emit("ready");
+  assert.equal(sync.status, "ready");
+  await sync.close();
+});
+
+test("fails startup and closes resources when Yjs pub/sub never becomes ready", async () => {
+  const fake = createFakeClient();
+  const pub = createFakeTransport("connecting");
+  const sub = createFakeTransport("connecting");
+  let extensionDestroyCalls = 0;
+
+  await assert.rejects(
+    createDocumentRedisSync({
+      commandTimeoutMs: 5,
+      connectTimeoutMs: 5,
+      createCommandClient: () => fake.client,
+      createExtension: () => ({
+        async onDestroy() { extensionDestroyCalls += 1; },
+        pub: pub.client,
+        sub: sub.client,
+      }),
+      enabled: true,
+      eventLogger() {},
+      instanceId: "realtime-pub-sub-timeout",
+      redisUrl: "redis://localhost",
+    }),
+    /Redis Yjs pub\/sub readiness timed out/,
+  );
+
+  assert.equal(extensionDestroyCalls, 1);
+  assert.equal(fake.calls.destroy, 1);
+});
+
 test("fails startup when the Redis readiness probe fails", async () => {
   const expectedError = new Error("Redis unavailable");
   const fake = createFakeClient({
@@ -133,7 +251,7 @@ test("marks an enabled runtime unavailable on reconnecting", async () => {
   const fake = createFakeClient();
   const sync = await createDocumentRedisSync({
     createCommandClient: () => fake.client,
-    createExtension: () => ({ async onDestroy() {} }),
+    createExtension: () => createFakeExtension().extension,
     enabled: true,
     eventLogger: (event) => events.push(event),
     instanceId: "realtime-b",
@@ -154,7 +272,7 @@ test("renews and finally releases the document checkpoint lease", async () => {
   const fake = createFakeClient();
   const sync = await createDocumentRedisSync({
     createCommandClient: () => fake.client,
-    createExtension: () => ({ async onDestroy() {} }),
+    createExtension: () => createFakeExtension().extension,
     enabled: true,
     eventLogger() {},
     instanceId: "realtime-b",
@@ -187,7 +305,7 @@ test("waits for a peer lease before entering the checkpoint", async () => {
   });
   const sync = await createDocumentRedisSync({
     createCommandClient: () => fake.client,
-    createExtension: () => ({ async onDestroy() {} }),
+    createExtension: () => createFakeExtension().extension,
     enabled: true,
     eventLogger() {},
     instanceId: "realtime-b",
@@ -210,7 +328,7 @@ test("bounds a checkpoint lock acquisition when Redis never answers", async () =
   const sync = await createDocumentRedisSync({
     commandTimeoutMs: 5,
     createCommandClient: () => fake.client,
-    createExtension: () => ({ async onDestroy() {} }),
+    createExtension: () => createFakeExtension().extension,
     enabled: true,
     eventLogger() {},
     instanceId: "realtime-b",
@@ -235,7 +353,7 @@ test("rejects a checkpoint when lease renewal never answers", async () => {
   const sync = await createDocumentRedisSync({
     commandTimeoutMs: 5,
     createCommandClient: () => fake.client,
-    createExtension: () => ({ async onDestroy() {} }),
+    createExtension: () => createFakeExtension().extension,
     enabled: true,
     eventLogger() {},
     instanceId: "realtime-b",
@@ -267,7 +385,7 @@ test("rejects a checkpoint when a delayed renewal reports lost ownership", async
   const sync = await createDocumentRedisSync({
     commandTimeoutMs: 20,
     createCommandClient: () => fake.client,
-    createExtension: () => ({ async onDestroy() {} }),
+    createExtension: () => createFakeExtension().extension,
     enabled: true,
     eventLogger() {},
     instanceId: "realtime-b",
@@ -295,7 +413,7 @@ test("bounds checkpoint lease release when Redis never answers", async () => {
   const sync = await createDocumentRedisSync({
     commandTimeoutMs: 5,
     createCommandClient: () => fake.client,
-    createExtension: () => ({ async onDestroy() {} }),
+    createExtension: () => createFakeExtension().extension,
     enabled: true,
     eventLogger() {},
     instanceId: "realtime-b",
@@ -321,7 +439,7 @@ test("forces command client destruction when Redis quit never answers", async ()
   const sync = await createDocumentRedisSync({
     commandTimeoutMs: 5,
     createCommandClient: () => fake.client,
-    createExtension: () => ({ async onDestroy() {} }),
+    createExtension: () => createFakeExtension().extension,
     enabled: true,
     eventLogger() {},
     instanceId: "realtime-b",

@@ -296,14 +296,15 @@ module "ecs" {
     }
 
     realtime-server = {
-      image              = "${module.ecr.repository_urls["pilo-realtime-server"]}:latest"
-      cpu                = var.realtime_server_cpu
-      memory             = var.realtime_server_memory
-      desired_count      = var.realtime_server_desired_count
-      container_port     = var.realtime_server_port
-      security_group_ids = [module.security_groups.realtime_server_security_group_id]
-      task_role_arn      = module.iam.realtime_server_task_role_arn
-      target_group_arn   = module.alb.realtime_target_group_arn
+      image                = "${module.ecr.repository_urls["pilo-realtime-server"]}:latest"
+      cpu                  = var.realtime_server_cpu
+      memory               = var.realtime_server_memory
+      desired_count        = var.realtime_server_desired_count
+      container_port       = var.realtime_server_port
+      security_group_ids   = [module.security_groups.realtime_server_security_group_id]
+      task_role_arn        = module.iam.realtime_server_task_role_arn
+      target_group_arn     = module.alb.realtime_target_group_arn
+      stop_timeout_seconds = 45
       environment = {
         APP_ENV                             = var.environment
         AWS_REGION                          = var.aws_region

@@ -43,7 +43,10 @@ type DocumentCheckpointStoreInput = DocumentCheckpointContext & {
 };
 
 export type DocumentCheckpointService = {
-  drain: () => Promise<void>;
+  drain: (options?: {
+    retryDelayMs?: number;
+    timeoutMs?: number;
+  }) => Promise<void>;
   loadDocument: (input: DocumentCheckpointContext) => Promise<Uint8Array>;
   storeDocument: (input: DocumentCheckpointStoreInput) => Promise<void>;
 };
@@ -60,6 +63,9 @@ export function createDocumentCheckpointService({
   refreshBeforeStore?: boolean;
 }): DocumentCheckpointService {
   const currentVersionByRoom = new Map<string, number>();
+  const failedStoreByRoom = new Map<string, DocumentCheckpointStoreInput>();
+  const latestStoreByRoom = new Map<string, DocumentCheckpointStoreInput>();
+  const pendingInputByWork = new Map<Promise<void>, DocumentCheckpointStoreInput>();
   const pendingStores = new Set<Promise<void>>();
 
   async function loadDocument(input: DocumentCheckpointContext) {
@@ -146,23 +152,81 @@ export function createDocumentCheckpointService({
     }
   }
 
-  function storeDocument(input: DocumentCheckpointStoreInput) {
+  function startStore(input: DocumentCheckpointStoreInput) {
     const key = roomKey(input);
     const work = checkpointCoordinator
       ? checkpointCoordinator.runExclusive(key, () => storeDocumentNow(input))
       : storeDocumentNow(input);
     pendingStores.add(work);
+    pendingInputByWork.set(work, input);
     void work.then(
-      () => pendingStores.delete(work),
-      () => pendingStores.delete(work),
+      () => {
+        pendingStores.delete(work);
+        pendingInputByWork.delete(work);
+        if (latestStoreByRoom.get(key) === input) {
+          failedStoreByRoom.delete(key);
+          latestStoreByRoom.delete(key);
+        }
+      },
+      () => {
+        pendingStores.delete(work);
+        pendingInputByWork.delete(work);
+        if (latestStoreByRoom.get(key) === input) failedStoreByRoom.set(key, input);
+      },
     );
     return work;
   }
 
-  async function drain() {
+  function storeDocument(input: DocumentCheckpointStoreInput) {
+    latestStoreByRoom.set(roomKey(input), input);
+    return startStore(input);
+  }
+
+  async function drain({ retryDelayMs = 100, timeoutMs = 20_000 } = {}) {
+    const deadline = performance.now() + timeoutMs;
+    let nextRetryDelayMs = retryDelayMs;
     await new Promise<void>((resolve) => setImmediate(resolve));
-    while (pendingStores.size > 0) {
-      await Promise.allSettled([...pendingStores]);
+    try {
+      while (true) {
+        while (pendingStores.size > 0) {
+          await beforeDeadline(Promise.allSettled([...pendingStores]), deadline);
+        }
+        if (failedStoreByRoom.size === 0) return;
+
+        const remainingMs = deadline - performance.now();
+        if (remainingMs <= 0) throw drainTimeoutError(failedStoreByRoom.size);
+        await delay(Math.min(nextRetryDelayMs, remainingMs));
+        if (performance.now() >= deadline) {
+          throw new Error("Document checkpoint drain deadline reached");
+        }
+        nextRetryDelayMs = Math.min(Math.max(1, nextRetryDelayMs * 2), 1_000);
+        for (const input of [...failedStoreByRoom.values()]) startStore(input);
+      }
+    } catch (error) {
+      reportDrainTimeout();
+      throw drainTimeoutError(unsavedInputs().length, { cause: error });
+    }
+  }
+
+  function unsavedInputs() {
+    const inputByRoom = new Map<string, DocumentCheckpointStoreInput>();
+    for (const input of pendingInputByWork.values()) {
+      inputByRoom.set(roomKey(input), input);
+    }
+    for (const input of failedStoreByRoom.values()) {
+      inputByRoom.set(roomKey(input), input);
+    }
+    return [...inputByRoom.values()];
+  }
+
+  function reportDrainTimeout() {
+    for (const input of unsavedInputs()) {
+      eventLogger({
+        documentId: input.documentId,
+        event: "document_checkpoint_drain_failed",
+        status: "timeout",
+        workspaceId: input.workspaceId,
+      });
     }
   }
 
@@ -212,6 +276,39 @@ export function createDocumentCheckpointService({
   }
 
   return { drain, loadDocument, storeDocument };
+}
+
+function delay(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function drainTimeoutError(failedCount: number, options?: ErrorOptions) {
+  return new Error(
+    `Document checkpoint drain timed out with ${failedCount} unsaved document(s)`,
+    options,
+  );
+}
+
+async function beforeDeadline<T>(
+  work: Promise<T>,
+  deadline: number,
+) {
+  const remainingMs = deadline - performance.now();
+  if (remainingMs <= 0) throw new Error("Document checkpoint drain deadline reached");
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Document checkpoint drain deadline reached")),
+          remainingMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function elapsedMs(startedAt: number) {

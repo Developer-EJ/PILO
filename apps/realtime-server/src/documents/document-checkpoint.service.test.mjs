@@ -342,6 +342,73 @@ test("drain waits for an in-flight checkpoint", async () => {
   assert.equal(drained, true);
 });
 
+test("drain retries a failed checkpoint before shutdown completes", async () => {
+  let saveCalls = 0;
+  const service = createDocumentCheckpointService({
+    client: {
+      async getDocument() {
+        return bootstrap(createDocumentWithText("initial"), 0);
+      },
+      async saveDocumentSnapshot() {
+        saveCalls += 1;
+        if (saveCalls === 1) throw new Error("temporary App failure");
+        return { document: { currentVersion: 1 } };
+      },
+    },
+  });
+  await service.loadDocument({ accessToken: "secret", room });
+
+  await assert.rejects(
+    service.storeDocument({
+      accessToken: "secret",
+      document: createDocumentWithText("edited"),
+      room,
+    }),
+    /temporary App failure/,
+  );
+  await service.drain({ retryDelayMs: 0, timeoutMs: 100 });
+
+  assert.equal(saveCalls, 2);
+});
+
+test("drain reports a terminal failure within its shutdown deadline", async () => {
+  const events = [];
+  const service = createDocumentCheckpointService({
+    client: {
+      async getDocument() {
+        return bootstrap(createDocumentWithText("initial"), 0);
+      },
+      async saveDocumentSnapshot() {
+        throw new Error("App remains unavailable");
+      },
+    },
+    eventLogger: (event) => events.push(event),
+  });
+  await service.loadDocument({ accessToken: "secret", room });
+  await assert.rejects(
+    service.storeDocument({
+      accessToken: "secret",
+      document: createDocumentWithText("edited"),
+      room,
+    }),
+    /App remains unavailable/,
+  );
+
+  const startedAt = performance.now();
+  await assert.rejects(
+    service.drain({ retryDelayMs: 1, timeoutMs: 20 }),
+    /checkpoint drain timed out/i,
+  );
+  assert.ok(performance.now() - startedAt < 200);
+  assert.ok(
+    events.some(
+      (event) =>
+        event.event === "document_checkpoint_drain_failed" &&
+        event.status === "timeout",
+    ),
+  );
+});
+
 test("runs the full checkpoint inside the distributed coordinator", async () => {
   const calls = [];
   const service = createDocumentCheckpointService({

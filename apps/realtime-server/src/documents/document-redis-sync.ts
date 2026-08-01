@@ -9,6 +9,13 @@ type RedisExtension = {
   afterStoreDocument?: (payload: unknown) => Promise<void>;
   onDestroy: () => Promise<void>;
   onStoreDocument?: (payload: unknown) => Promise<void>;
+  pub: RedisSyncTransportClient;
+  sub: RedisSyncTransportClient;
+};
+
+type RedisSyncTransportClient = {
+  on: (event: string, listener: () => void) => unknown;
+  status?: string;
 };
 
 type RedisExtensionConfiguration = {
@@ -118,7 +125,11 @@ export async function createDocumentRedisSync({
 
   const commandClient = createCommandClient(redisUrl);
   let status: DocumentRedisSync["status"] = "unavailable";
-  const updateStatus = (nextStatus: "ready" | "unavailable") => {
+  const readiness = { command: false, pub: false, sub: false };
+  const updateStatus = () => {
+    const nextStatus = Object.values(readiness).every(Boolean)
+      ? "ready"
+      : "unavailable";
     if (status === nextStatus) return;
     status = nextStatus;
     eventLogger({
@@ -129,15 +140,19 @@ export async function createDocumentRedisSync({
       status: nextStatus,
     });
   };
-  commandClient.on("ready", () => updateStatus("ready"));
-  commandClient.on("end", () => updateStatus("unavailable"));
-  commandClient.on("error", () => updateStatus("unavailable"));
-  commandClient.on("reconnecting", () => updateStatus("unavailable"));
+  const setReadiness = (resource: keyof typeof readiness, ready: boolean) => {
+    readiness[resource] = ready;
+    updateStatus();
+  };
+  commandClient.on("ready", () => setReadiness("command", true));
+  commandClient.on("end", () => setReadiness("command", false));
+  commandClient.on("error", () => setReadiness("command", false));
+  commandClient.on("reconnecting", () => setReadiness("command", false));
 
   try {
     await withTimeout(commandClient.connect(), connectTimeoutMs, "Redis connect");
     await withTimeout(commandClient.ping(), connectTimeoutMs, "Redis ping");
-    updateStatus("ready");
+    setReadiness("command", true);
   } catch (error) {
     commandClient.destroy();
     throw error;
@@ -150,6 +165,50 @@ export async function createDocumentRedisSync({
     options,
     port: Number(parsedUrl.port || "6379"),
   });
+  const waitForTransport = (
+    resource: "pub" | "sub",
+    client: RedisSyncTransportClient,
+  ) => {
+    let resolveInitialReady: (() => void) | undefined;
+    const initialReady = new Promise<void>((resolve) => {
+      resolveInitialReady = resolve;
+    });
+    const markReady = () => {
+      setReadiness(resource, true);
+      resolveInitialReady?.();
+      resolveInitialReady = undefined;
+    };
+    const markUnavailable = () => setReadiness(resource, false);
+    client.on("ready", markReady);
+    client.on("close", markUnavailable);
+    client.on("end", markUnavailable);
+    client.on("error", markUnavailable);
+    client.on("reconnecting", markUnavailable);
+    if (client.status === "ready") markReady();
+    return initialReady;
+  };
+  try {
+    await withTimeout(
+      Promise.all([
+        waitForTransport("pub", extension.pub),
+        waitForTransport("sub", extension.sub),
+      ]),
+      connectTimeoutMs,
+      "Redis Yjs pub/sub readiness",
+    );
+  } catch (error) {
+    try {
+      await withTimeout(
+        extension.onDestroy(),
+        commandTimeoutMs,
+        "Redis extension cleanup",
+      );
+    } catch {
+      // Startup is already failing; force-close the independent command client too.
+    }
+    commandClient.destroy();
+    throw error;
+  }
   // Checkpoint locking is handled below with a renewable lease and finally-release.
   // The official extension remains responsible for Yjs sync and awareness fan-out.
   extension.onStoreDocument = async () => undefined;
@@ -171,7 +230,7 @@ export async function createDocumentRedisSync({
             "Redis checkpoint lock acquisition",
           );
         } catch (error) {
-          updateStatus("unavailable");
+          setReadiness("command", false);
           throw error;
         }
         if (acquired === "OK") break;
@@ -198,7 +257,7 @@ export async function createDocumentRedisSync({
             if (Number(renewed) !== 1) ownershipLost = true;
           } catch {
             ownershipLost = true;
-            updateStatus("unavailable");
+            setReadiness("command", false);
           }
         })();
         currentRenewal = renewal;
@@ -234,7 +293,7 @@ export async function createDocumentRedisSync({
             "Redis checkpoint lock release",
           );
         } catch {
-          updateStatus("unavailable");
+          setReadiness("command", false);
         }
       }
     },
@@ -253,7 +312,7 @@ export async function createDocumentRedisSync({
           "Redis extension close",
         );
       } catch {
-        updateStatus("unavailable");
+        setReadiness("command", false);
       }
       try {
         await withTimeout(commandClient.quit(), commandTimeoutMs, "Redis quit");

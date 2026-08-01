@@ -22,6 +22,9 @@ type HocuspocusDocumentServer = DocumentHocuspocusInstance & {
   flushPendingStores: () => void;
   getConnectionsCount: () => number;
   getDocumentsCount: () => number;
+  unloadDocument: (
+    document: HocuspocusDocumentConnectionStore,
+  ) => Promise<unknown>;
 };
 
 type HocuspocusDocument = Parameters<
@@ -75,6 +78,7 @@ export function createDocumentHocuspocusService({
   extensions = [],
   instanceId = "pilo-realtime-server",
   sessionService,
+  shutdownTimeoutMs = 20_000,
 }: {
   accessService: DocumentAccessService;
   checkpointService: DocumentCheckpointService;
@@ -82,6 +86,7 @@ export function createDocumentHocuspocusService({
   extensions?: readonly unknown[];
   instanceId?: string;
   sessionService: RealtimeSessionService;
+  shutdownTimeoutMs?: number;
 }): DocumentHocuspocusService {
   const shutdownWaiters = new Set<() => void>();
 
@@ -159,22 +164,71 @@ export function createDocumentHocuspocusService({
   });
 
   async function shutdown() {
+    const deadline = performance.now() + shutdownTimeoutMs;
     hocuspocus.closeConnections();
     hocuspocus.flushPendingStores();
-    await checkpointService.drain();
+    await withinShutdownBudget(
+      checkpointService.drain({ timeoutMs: remainingShutdownMs(deadline) }),
+      deadline,
+      "checkpoint drain",
+    );
 
-    if (hocuspocus.getDocumentsCount() === 0) {
-      return;
+    await withinShutdownBudget(
+      Promise.all(
+        [...hocuspocus.documents.values()].map((document) =>
+          hocuspocus.unloadDocument(document),
+        ),
+      ),
+      deadline,
+      "document unload",
+    );
+
+    if (hocuspocus.getDocumentsCount() !== 0) {
+      let resolveWaiter: (() => void) | undefined;
+      const unloaded = new Promise<void>((resolve) => {
+        resolveWaiter = resolve;
+        shutdownWaiters.add(resolve);
+        resolveShutdownWaiters(hocuspocus);
+      });
+      try {
+        await withinShutdownBudget(unloaded, deadline, "document unload");
+      } finally {
+        if (resolveWaiter) shutdownWaiters.delete(resolveWaiter);
+      }
     }
-
-    await new Promise<void>((resolve) => {
-      shutdownWaiters.add(resolve);
-      resolveShutdownWaiters(hocuspocus);
-    });
-    await checkpointService.drain();
+    await withinShutdownBudget(
+      checkpointService.drain({ timeoutMs: remainingShutdownMs(deadline) }),
+      deadline,
+      "final checkpoint drain",
+    );
   }
 
   return { authorizeDocument, hocuspocus, loadDocument, shutdown, storeDocument };
+}
+
+function remainingShutdownMs(deadline: number) {
+  return Math.max(1, Math.ceil(deadline - performance.now()));
+}
+
+async function withinShutdownBudget<T>(
+  work: Promise<T>,
+  deadline: number,
+  phase: string,
+) {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Document shutdown timed out during ${phase}`)),
+          remainingShutdownMs(deadline),
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function parseDocumentRoomName(documentName: string): DocumentRoomRef | null {

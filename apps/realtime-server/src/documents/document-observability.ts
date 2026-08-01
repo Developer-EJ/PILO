@@ -1,5 +1,6 @@
 export type DocumentEventName =
   | "document_checkpoint_conflict"
+  | "document_checkpoint_drain_failed"
   | "document_checkpoint_failed"
   | "document_checkpoint_started"
   | "document_checkpoint_succeeded"

@@ -245,3 +245,68 @@ test("shutdown waits for checkpoint drain after flushing pending stores", async 
   await shutdown;
   assert.equal(shutdownFinished, true);
 });
+
+test("shutdown unloads a document retained after an earlier store failure", async () => {
+  const service = createDocumentHocuspocusService({
+    accessService: { async getDocumentRoomAccess() { return { readOnly: false }; } },
+    checkpointService: {
+      async drain() {},
+      async loadDocument() { return new Uint8Array(); },
+      async storeDocument() {},
+    },
+    sessionService: {
+      async validateSessionToken() {
+        return { displayName: "PILO", userId: "user-1" };
+      },
+    },
+    shutdownTimeoutMs: 100,
+  });
+  const retainedDocument = {};
+  let documentCount = 1;
+  let unloadCalls = 0;
+  service.hocuspocus.documents = new Map([[roomName(), retainedDocument]]);
+  service.hocuspocus.closeConnections = () => undefined;
+  service.hocuspocus.flushPendingStores = () => undefined;
+  service.hocuspocus.getDocumentsCount = () => documentCount;
+  service.hocuspocus.unloadDocument = async (document) => {
+    assert.equal(document, retainedDocument);
+    unloadCalls += 1;
+    documentCount = 0;
+  };
+
+  const outcome = await Promise.race([
+    service.shutdown().then(() => "completed"),
+    new Promise((resolve) => setTimeout(() => resolve("still-pending"), 200)),
+  ]);
+
+  assert.equal(outcome, "completed");
+  assert.equal(unloadCalls, 1);
+});
+
+test("shutdown rejects within its budget when checkpoint draining hangs", async () => {
+  const service = createDocumentHocuspocusService({
+    accessService: { async getDocumentRoomAccess() { return { readOnly: false }; } },
+    checkpointService: {
+      async drain() { return new Promise(() => undefined); },
+      async loadDocument() { return new Uint8Array(); },
+      async storeDocument() {},
+    },
+    sessionService: {
+      async validateSessionToken() {
+        return { displayName: "PILO", userId: "user-1" };
+      },
+    },
+    shutdownTimeoutMs: 20,
+  });
+
+  const outcome = await Promise.race([
+    service.shutdown().then(
+      () => "completed",
+      (error) => error,
+    ),
+    new Promise((resolve) => setTimeout(() => resolve("still-pending"), 200)),
+  ]);
+
+  assert.notEqual(outcome, "still-pending");
+  assert.match(outcome.message, /shutdown timed out/i);
+});

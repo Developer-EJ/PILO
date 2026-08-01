@@ -116,6 +116,7 @@ jobs:
             echo "desired_count=$previous_desired_count"
             echo "image_uri=${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}@${previous_image_digest}"
             echo "rollback_desired_count=$rollback_desired_count"
+            echo "task_definition=$previous_task_definition"
           } >> "$GITHUB_OUTPUT"
 
       - name: Build and push image
@@ -139,6 +140,7 @@ jobs:
             .containerDefinitions |= map(
               if .name == $container then
                 .image = $image
+                | .stopTimeout = 45
                 | .environment = (
                     (.environment // [] | map(select(.name != "DOCUMENT_REDIS_SYNC_ENABLED")))
                     + [{"name":"DOCUMENT_REDIS_SYNC_ENABLED","value":"true"}]
@@ -172,6 +174,25 @@ jobs:
             --query 'taskDefinition.taskDefinitionArn' \
             --output text)
           echo "arn=$new_task_definition" >> "$GITHUB_OUTPUT"
+
+      - name: Scale existing revision to one task
+        id: scale-existing
+        run: |
+          aws ecs update-service \
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+            --service "${{ vars.ECS_REALTIME_SERVER_SERVICE }}" \
+            --desired-count 1
+          aws ecs wait services-stable \
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+            --services "${{ vars.ECS_REALTIME_SERVER_SERVICE }}"
+
+          service_json=$(aws ecs describe-services \
+            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+            --services "${{ vars.ECS_REALTIME_SERVER_SERVICE }}")
+          test "$(jq -r '.services[0].desiredCount' <<< "$service_json")" = "1"
+          test "$(jq -r '.services[0].runningCount' <<< "$service_json")" = "1"
+          test "$(jq -r '.services[0].taskDefinition' <<< "$service_json")" = \
+            "${{ steps.previous.outputs.task_definition }}"
 
       - name: Deploy one-task canary
         id: deploy-canary
@@ -241,8 +262,9 @@ jobs:
           fi
 
       - name: Roll back failed canary
-        if: ${{ failure() && (steps.deploy-canary.outcome == 'success' || steps.deploy-canary.outcome == 'failure') }}
+        if: ${{ failure() && (steps.scale-existing.outcome == 'success' || steps.scale-existing.outcome == 'failure' || steps.deploy-canary.outcome == 'success' || steps.deploy-canary.outcome == 'failure') }}
         env:
+          CANARY_OUTCOME: ${{ steps.deploy-canary.outcome }}
           PREVIOUS_IMAGE_URI: ${{ steps.previous.outputs.image_uri }}
           ROLLBACK_DESIRED_COUNT: ${{ steps.previous.outputs.rollback_desired_count }}
         run: |
@@ -268,15 +290,17 @@ jobs:
             --query 'taskDefinition.taskDefinitionArn' \
             --output text)
 
-          aws ecs update-service \
-            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
-            --service "${{ vars.ECS_REALTIME_SERVER_SERVICE }}" \
-            --task-definition "${{ steps.task-definition.outputs.arn }}" \
-            --desired-count 1
-          aws ecs wait services-stable \
-            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
-            --services "${{ vars.ECS_REALTIME_SERVER_SERVICE }}" || \
-            echo "Coordinated revision did not stabilize; continuing rollback at one task"
+          if [[ "$CANARY_OUTCOME" == "success" || "$CANARY_OUTCOME" == "failure" ]]; then
+            aws ecs update-service \
+              --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+              --service "${{ vars.ECS_REALTIME_SERVER_SERVICE }}" \
+              --task-definition "${{ steps.task-definition.outputs.arn }}" \
+              --desired-count 1
+            aws ecs wait services-stable \
+              --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+              --services "${{ vars.ECS_REALTIME_SERVER_SERVICE }}" || \
+              echo "Coordinated revision did not stabilize; continuing rollback at one task"
+          fi
 
           aws ecs update-service \
             --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
