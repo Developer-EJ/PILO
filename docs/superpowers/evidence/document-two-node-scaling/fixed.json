@@ -1,14 +1,13 @@
 {
   "checkpoint409Count": 0,
   "checkpointInstances": [
-    "realtime-a",
     "realtime-b"
   ],
   "editsPerRound": 1500,
   "gracefulHandoff": {
     "markerPreserved": true,
     "pendingCheckpointDrained": true,
-    "stoppedInstanceId": "realtime-b"
+    "stoppedInstanceId": "realtime-a"
   },
   "instanceIds": [
     "realtime-a",
@@ -68,7 +67,7 @@
     },
     {
       "expectedVersion": 0,
-      "instanceId": "realtime-a",
+      "instanceId": "realtime-b",
       "phase": "round-2",
       "status": 200
     },
@@ -80,7 +79,7 @@
     },
     {
       "expectedVersion": 1,
-      "instanceId": "realtime-b",
+      "instanceId": "realtime-a",
       "phase": "graceful-handoff",
       "status": 200
     }
