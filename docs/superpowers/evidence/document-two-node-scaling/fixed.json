@@ -1,0 +1,88 @@
+{
+  "checkpoint409Count": 0,
+  "checkpointInstances": [
+    "realtime-b"
+  ],
+  "editsPerRound": 1500,
+  "gracefulHandoff": {
+    "markerPreserved": true,
+    "pendingCheckpointDrained": true,
+    "stoppedInstanceId": "realtime-a"
+  },
+  "instanceIds": [
+    "realtime-a",
+    "realtime-b"
+  ],
+  "mode": "fixed",
+  "nodeHealth": [
+    {
+      "instanceId": "realtime-a",
+      "redisSync": {
+        "enabled": true,
+        "status": "ready"
+      }
+    },
+    {
+      "instanceId": "realtime-b",
+      "redisSync": {
+        "enabled": true,
+        "status": "ready"
+      }
+    }
+  ],
+  "normalOperation": true,
+  "rounds": [
+    {
+      "checkpoint409Count": 0,
+      "checkpointRequestCount": 1,
+      "liveConvergence": true,
+      "persistedEditCount": 1500,
+      "persistedVersion": 1,
+      "reconnectedEditCount": 1500
+    },
+    {
+      "checkpoint409Count": 0,
+      "checkpointRequestCount": 1,
+      "liveConvergence": true,
+      "persistedEditCount": 1500,
+      "persistedVersion": 1,
+      "reconnectedEditCount": 1500
+    },
+    {
+      "checkpoint409Count": 0,
+      "checkpointRequestCount": 1,
+      "liveConvergence": true,
+      "persistedEditCount": 1500,
+      "persistedVersion": 1,
+      "reconnectedEditCount": 1500
+    }
+  ],
+  "sessionCount": 5,
+  "snapshotRequests": [
+    {
+      "expectedVersion": 0,
+      "instanceId": "realtime-b",
+      "phase": "round-1",
+      "status": 200
+    },
+    {
+      "expectedVersion": 0,
+      "instanceId": "realtime-b",
+      "phase": "round-2",
+      "status": 200
+    },
+    {
+      "expectedVersion": 0,
+      "instanceId": "realtime-b",
+      "phase": "round-3",
+      "status": 200
+    },
+    {
+      "expectedVersion": 1,
+      "instanceId": "realtime-a",
+      "phase": "graceful-handoff",
+      "status": 200
+    }
+  ],
+  "totalEdits": 4500
+}

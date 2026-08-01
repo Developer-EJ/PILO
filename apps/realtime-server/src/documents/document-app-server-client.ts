@@ -41,9 +41,11 @@ export type DocumentAppServerClient = {
 export function createDocumentAppServerClient({
   appServerUrl,
   fetcher = fetch,
+  requestTimeoutMs = 5_000,
 }: {
   appServerUrl: string;
   fetcher?: typeof fetch;
+  requestTimeoutMs?: number;
 }): DocumentAppServerClient {
   function pathFor(room: DocumentRoomRef) {
     const workspaceId = encodeURIComponent(room.workspaceId);
@@ -58,6 +60,7 @@ export function createDocumentAppServerClient({
   ): Promise<T> {
     const response = await fetcher(`${pathFor(input)}${pathSuffix}`, {
       ...init,
+      signal: AbortSignal.timeout(requestTimeoutMs),
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${input.accessToken}`,
