@@ -371,7 +371,8 @@ jobs:
               --log-stream-name "$expected_log_stream" \
               --start-time "$CANARY_STARTED_MS" \
               --start-from-head \
-              --limit 10 2>/dev/null); then
+              --limit 10 \
+              --no-paginate 2>/dev/null); then
               if jq -e \
                 --argjson started "$CANARY_STARTED_MS" '
                   any(.events[]?; .timestamp >= $started)
