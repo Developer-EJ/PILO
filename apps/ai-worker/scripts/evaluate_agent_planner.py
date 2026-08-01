@@ -63,6 +63,11 @@ def main() -> None:
         help="Path to the Meeting regression capability catalog JSON.",
     )
     parser.add_argument(
+        "--workflow-catalog",
+        type=Path,
+        help="Path to the Agent workflow scenario catalog JSON.",
+    )
+    parser.add_argument(
         "--multiturn-catalog",
         type=Path,
         help="Path to the frozen multi-turn context benchmark catalog JSON.",
@@ -271,9 +276,9 @@ def main() -> None:
     elif workflow_mode:
         assert router is not None
         assert args.meeting_variant == "multi_tool"
-        if args.meeting_catalog is None:
-            raise SystemExit("multi_tool evaluation requires --meeting-catalog")
-        scenarios = load_workflow_scenarios(args.meeting_catalog)
+        if args.workflow_catalog is None:
+            raise SystemExit("multi_tool evaluation requires --workflow-catalog")
+        scenarios = load_workflow_scenarios(args.workflow_catalog)
         workflow_results = evaluate_workflow_suite(
             planner,
             router,

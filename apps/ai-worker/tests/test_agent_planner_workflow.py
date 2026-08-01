@@ -31,6 +31,8 @@ def test_multi_tool_variant_uses_sequential_workflow_evaluator() -> None:
     script = EVALUATOR_SCRIPT_PATH.read_text(encoding="utf-8")
 
     assert 'args.meeting_variant == "multi_tool"' in script
+    assert '"--workflow-catalog"' in script
+    assert "load_workflow_scenarios(args.workflow_catalog)" in script
     assert "evaluate_workflow_suite(" in script
     assert "build_workflow_evaluation_report(" in script
     assert '"evaluatorSha256": _evaluator_sha256()' in script
@@ -91,9 +93,9 @@ def test_snapshot_scope_can_run_agent_workflow_and_publish_summary() -> None:
     assert "agent-workflow-catalog.json" in workflow
     assert "matrix.variant == 'multi_turn_context'" in workflow
     assert 'EVALUATION_VARIANT="multi_tool"' in workflow
-    assert 'EVALUATION_CATALOG="$RUNNER_TEMP/prepared/agent-workflow-catalog.json"' in workflow
-    assert '--meeting-catalog "$EVALUATION_CATALOG"' in workflow
+    assert '--meeting-catalog "$RUNNER_TEMP/prepared/meeting-agent-capability-catalog.json"' in workflow
     assert '--meeting-variant "$EVALUATION_VARIANT"' in workflow
+    assert '--workflow-catalog "$RUNNER_TEMP/prepared/agent-workflow-catalog.json"' in workflow
     assert "agent-evaluation-target-${{ needs.prepare.outputs.snapshot_scope }}" in workflow
     assert "target-meeting-${SNAPSHOT_SCOPE}-evaluation.json" in workflow
     assert '--summary-output "$GITHUB_STEP_SUMMARY"' in workflow
