@@ -38,8 +38,10 @@ assert.match(
   workflow,
   /expected_log_stream="app-server\/\$\{CONTAINER_NAME\}\/\$\{canary_task_id\}"/
 );
-assert.match(workflow, /--log-stream-name-prefix "\$expected_log_stream"/);
-assert.match(workflow, /\.logStreamName == \$expected_stream/);
+assert.match(workflow, /aws logs get-log-events/);
+assert.match(workflow, /--log-stream-name "\$expected_log_stream"/);
+assert.match(workflow, /--start-time "\$CANARY_STARTED_MS"/);
+assert.doesNotMatch(workflow, /aws logs describe-log-streams/);
 assert.match(workflow, /Restore intended task count/);
 
 assert.match(workflow, /Capture optional worker rollback state/);

@@ -105,8 +105,9 @@ const defaultSinkResult = spawnSync(
   { encoding: "utf8" }
 );
 assert.equal(defaultSinkResult.status, 0, defaultSinkResult.stderr);
+assert.equal(defaultSinkResult.stdout, "", "the production sink must use stderr");
 assert.equal(
-  `${defaultSinkResult.stdout}${defaultSinkResult.stderr}`.trim(),
+  defaultSinkResult.stderr.trim(),
   JSON.stringify(event),
   "the production sink must emit one raw JSON object without a Nest text prefix"
 );

@@ -131,7 +131,7 @@ The temporary one-task stage in step 6 is a deployment canary, not a rollback to
 - It verifies the CloudWatch log group.
 - It registers an immutable-digest task definition containing the required `awslogs` options.
 - It deploys one task before returning to the intended count.
-- CloudWatch delivery is verified against the exact stream derived from the running canary task ID, not merely any stream with the App Server prefix.
+- CloudWatch delivery is verified by reading events after canary start from the exact stream derived from the running canary task ID. It does not rely on the eventually consistent `DescribeLogStreams.lastEventTimestamp` field or merely any stream with the App Server prefix.
 - A failed canary uses the prior immutable image and restores the prior count.
 - The optional GitHub sync worker independently preserves and restores its task definition, digest, and desired count.
 - `actionlint` and embedded shell checks pass.
