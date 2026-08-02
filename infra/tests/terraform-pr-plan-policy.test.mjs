@@ -35,6 +35,10 @@ assert.notEqual(planJobStart, -1, 'Terraform plan job must exist');
 const planJob = workflow.slice(planJobStart);
 
 assert.match(workflow, /Verify Terraform PR plan policy\s*\n\s*run: node infra\/tests\/terraform-pr-plan-policy\.test\.mjs/);
+assert.match(
+  workflow,
+  /Verify core service observability contract\s*\n\s*run: node infra\/tests\/core-services-observability\.test\.mjs/,
+);
 assert.match(planJob, /vars\.AWS_TERRAFORM_PLAN_ROLE_ARN/);
 assert.match(planJob, /github\.event\.pull_request\.head\.repo\.full_name\s*==\s*github\.repository/);
 assert.match(planJob, /github\.event_name\s*==\s*'workflow_dispatch'/);

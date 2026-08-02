@@ -532,6 +532,15 @@ module "pr_review_observability" {
   name_prefix = local.name_prefix
 }
 
+module "core_services_observability" {
+  source = "../../modules/core-services-observability"
+
+  name_prefix                      = local.name_prefix
+  load_balancer_arn_suffix         = module.alb.alb_arn_suffix
+  app_target_group_arn_suffix      = module.alb.app_target_group_arn_suffix
+  realtime_target_group_arn_suffix = module.alb.realtime_target_group_arn_suffix
+}
+
 moved {
   from = aws_route53_record.frontend[0]
   to   = aws_route53_record.frontend["dev.pilo.my"]
