@@ -9,7 +9,7 @@ const [devEnvironment, iamMain, iamVariables, secretsOutputs] = await Promise.al
 ]);
 
 assert.match(devEnvironment, /workspace-indexer-worker\s*=\s*\{/);
-assert.match(devEnvironment, /desired_count\s*=\s*1/);
+assert.match(devEnvironment, /desired_count\s*=\s*2/);
 assert.match(devEnvironment, /app\.workspace_indexing_worker_runtime/);
 assert.match(devEnvironment, /SQS_WORKSPACE_INDEXING_QUEUE_URL/);
 assert.match(devEnvironment, /workspace_indexer_worker_task_role_arn/);
