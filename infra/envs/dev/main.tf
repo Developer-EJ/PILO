@@ -535,8 +535,6 @@ module "pr_review_observability" {
 module "core_services_observability" {
   source = "../../modules/core-services-observability"
 
-  depends_on = [module.ecs, module.sqs, module.alb]
-
   name_prefix                      = local.name_prefix
   load_balancer_arn_suffix         = module.alb.alb_arn_suffix
   app_target_group_arn_suffix      = module.alb.app_target_group_arn_suffix

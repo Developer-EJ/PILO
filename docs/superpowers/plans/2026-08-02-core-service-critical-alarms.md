@@ -4,7 +4,7 @@
 
 **Goal:** PILO dev의 미감시 핵심 ECS 서비스 네 개에 자동 조치 없는 최소 CloudWatch Alarm 여덟 개를 Terraform으로 생성한다.
 
-**Architecture:** 새 `core-services-observability` 모듈이 ECS 실행 상태 4개, ALB 정상 target 2개, DLQ backlog 2개를 소유한다. 기존 ALB 모듈은 metric dimension에 필요한 ARN suffix만 output으로 노출하고, dev root module은 기존 ECS·SQS·ALB 뒤에 observability 모듈을 연결한다.
+**Architecture:** 새 `core-services-observability` 모듈이 ECS 실행 상태 4개, ALB 정상 target 2개, DLQ backlog 2개를 소유한다. 기존 ALB 모듈은 metric dimension에 필요한 ARN suffix만 output으로 노출한다. ALB output 참조만 암시적 의존성으로 사용하고 ECS·SQS에 대한 명시적 `depends_on`은 두지 않아 기존 애플리케이션 drift를 scoped plan에서 격리한다.
 
 **Tech Stack:** Terraform 1.15.8, AWS provider 5.100.0, CloudWatch, ECS Container Insights, Application Load Balancer metrics, SQS metrics, Node.js 24 정적 계약 테스트.
 
@@ -16,7 +16,8 @@
 - 모든 Alarm은 `actions_enabled = false`이며 `alarm_actions`, `ok_actions`, `insufficient_data_actions`를 선언하지 않는다.
 - 자동 재시작, 롤백, 배포, 확장, 복구를 추가하지 않는다.
 - `main` 대상 PR이나 prod 변경을 만들지 않는다.
-- 실제 apply는 원격 state plan이 정확히 `8 to add, 0 to change, 0 to destroy`일 때만 허용한다.
+- 실제 apply는 `-target=module.core_services_observability`로 만든 원격 state 저장 plan이 정확히 `8 to add, 0 to change, 0 to destroy`일 때만 허용한다.
+- 기존 drift가 포함된 전체 plan은 검토 증거로만 사용하고 apply하지 않는다.
 - Alarm 생성 후 안정화 전에는 PILO Incident Investigator에 연결하지 않는다.
 
 ---
@@ -108,7 +109,11 @@ assert.match(albOutputs, /output "app_target_group_arn_suffix"[\s\S]*?aws_lb_tar
 assert.match(albOutputs, /output "realtime_target_group_arn_suffix"[\s\S]*?aws_lb_target_group\.realtime\.arn_suffix/);
 assert.match(devEnvironment, /module "core_services_observability"/);
 assert.match(devEnvironment, /source\s*=\s*"\.\.\/\.\.\/modules\/core-services-observability"/);
-assert.match(devEnvironment, /depends_on\s*=\s*\[module\.ecs, module\.sqs, module\.alb\]/);
+const moduleStart = devEnvironment.indexOf('module "core_services_observability"');
+const moduleEnd = devEnvironment.indexOf("\nmoved {", moduleStart);
+assert.ok(moduleStart >= 0 && moduleEnd > moduleStart);
+const devModule = devEnvironment.slice(moduleStart, moduleEnd);
+assert.doesNotMatch(devModule, /depends_on\s*=/);
 assert.match(devEnvironment, /load_balancer_arn_suffix\s*=\s*module\.alb\.alb_arn_suffix/);
 assert.match(devEnvironment, /app_target_group_arn_suffix\s*=\s*module\.alb\.app_target_group_arn_suffix/);
 assert.match(devEnvironment, /realtime_target_group_arn_suffix\s*=\s*module\.alb\.realtime_target_group_arn_suffix/);
@@ -286,8 +291,6 @@ action list 속성은 추가하지 않는다.
 module "core_services_observability" {
   source = "../../modules/core-services-observability"
 
-  depends_on = [module.ecs, module.sqs, module.alb]
-
   name_prefix                      = local.name_prefix
   load_balancer_arn_suffix         = module.alb.alb_arn_suffix
   app_target_group_arn_suffix      = module.alb.app_target_group_arn_suffix
@@ -338,7 +341,7 @@ git commit -m "feat: dev 핵심 서비스 Alarm을 추가한다 (#1811)"
 **Interfaces:**
 
 - Consumes: 검증된 기능 브랜치
-- Produces: `dev` 대상 ready PR과 원격 state Terraform plan
+- Produces: `dev` 대상 ready PR, 전체 plan 비교 증거, Alarm 전용 scoped 저장 plan
 
 - [ ] **Step 1: 범위 자체 검토**
 
@@ -370,15 +373,21 @@ Run: `gh pr checks --watch`
 
 Expected: 모든 required check가 `pass`.
 
-- [ ] **Step 4: PR Terraform plan 검토**
+- [ ] **Step 4: PR 전체 Terraform plan과 직전 dev baseline 비교**
 
-Expected plan:
+확인된 직전 dev baseline:
 
 ```text
-Plan: 8 to add, 0 to change, 0 to destroy.
+Plan: 8 to add, 9 to change, 8 to destroy.
 ```
 
-추가되는 주소는 아래 세 집합의 8개 instance로 제한한다.
+Alarm 브랜치 전체 plan:
+
+```text
+Plan: 16 to add, 9 to change, 8 to destroy.
+```
+
+두 plan의 차이는 아래 신규 Alarm 8개 생성으로 제한되어야 한다.
 
 ```text
 module.core_services_observability.aws_cloudwatch_metric_alarm.running_task_count["app-server"]
@@ -391,15 +400,24 @@ module.core_services_observability.aws_cloudwatch_metric_alarm.dlq_backlog["ai-w
 module.core_services_observability.aws_cloudwatch_metric_alarm.dlq_backlog["workspace-indexer-worker"]
 ```
 
-다른 주소가 create/update/replace/delete되면 병합하지 않고 중단한다.
+전체 plan은 기존 ECS·RDS drift를 포함하므로 apply하지 않는다. 브랜치가 기존 change/destroy 수를 늘리거나 위 여덟 주소 외 신규 변경을 더하면 병합하지 않는다.
 
-- [ ] **Step 5: dev 병합**
+- [ ] **Step 5: 병합 전 Alarm 전용 scoped 저장 plan 검증**
+
+```powershell
+terraform -chdir=infra/envs/dev plan -target=module.core_services_observability -out=core-service-alarms.tfplan
+terraform -chdir=infra/envs/dev show -no-color core-service-alarms.tfplan
+```
+
+Expected: `8 to add, 0 to change, 0 to destroy`, 모두 위 CloudWatch Alarm 주소.
+
+- [ ] **Step 6: dev 병합**
 
 Run: `gh pr merge --merge --delete-branch`
 
 Expected: PR state `MERGED`, base branch `dev`.
 
-### Task 4: 저장된 plan 적용과 Alarm 상태 관찰
+### Task 4: scoped 저장 plan 적용과 Alarm 상태 관찰
 
 **Files:**
 
@@ -431,7 +449,7 @@ Expected: 기존 remote state backend 초기화 성공.
 - [ ] **Step 3: 저장된 plan 생성**
 
 ```powershell
-terraform -chdir=infra/envs/dev plan -out=core-service-alarms.tfplan
+terraform -chdir=infra/envs/dev plan -target=module.core_services_observability -out=core-service-alarms.tfplan
 terraform -chdir=infra/envs/dev show -no-color core-service-alarms.tfplan
 ```
 
@@ -452,6 +470,8 @@ Expected: `8 to add, 0 to change, 0 to destroy`, 모두 새 CloudWatch Alarm 주
 Run: `terraform -chdir=infra/envs/dev apply core-service-alarms.tfplan`
 
 Expected: `Apply complete! Resources: 8 added, 0 changed, 0 destroyed.`
+
+저장 plan 파일 없이 `terraform apply`를 실행하거나 전체 configuration plan을 적용하지 않는다.
 
 - [ ] **Step 6: Alarm 존재와 상태 확인**
 

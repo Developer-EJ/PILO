@@ -74,7 +74,11 @@ assert.match(
 );
 assert.match(devEnvironment, /module "core_services_observability"/);
 assert.match(devEnvironment, /source\s*=\s*"\.\.\/\.\.\/modules\/core-services-observability"/);
-assert.match(devEnvironment, /depends_on\s*=\s*\[module\.ecs, module\.sqs, module\.alb\]/);
+const moduleStart = devEnvironment.indexOf('module "core_services_observability"');
+const moduleEnd = devEnvironment.indexOf("\nmoved {", moduleStart);
+assert.ok(moduleStart >= 0 && moduleEnd > moduleStart);
+const devModule = devEnvironment.slice(moduleStart, moduleEnd);
+assert.doesNotMatch(devModule, /depends_on\s*=/);
 assert.match(devEnvironment, /load_balancer_arn_suffix\s*=\s*module\.alb\.alb_arn_suffix/);
 assert.match(devEnvironment, /app_target_group_arn_suffix\s*=\s*module\.alb\.app_target_group_arn_suffix/);
 assert.match(
