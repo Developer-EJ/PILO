@@ -1,19 +1,33 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [moduleMain, moduleVariables, albOutputs, devEnvironment] = await Promise.all([
+const [moduleMain, moduleVariables, albOutputs, devEnvironment, gitignore] = await Promise.all([
   readFile(new URL("../modules/core-services-observability/main.tf", import.meta.url), "utf8"),
   readFile(new URL("../modules/core-services-observability/variables.tf", import.meta.url), "utf8"),
   readFile(new URL("../modules/alb/outputs.tf", import.meta.url), "utf8"),
-  readFile(new URL("../envs/dev/main.tf", import.meta.url), "utf8")
+  readFile(new URL("../envs/dev/main.tf", import.meta.url), "utf8"),
+  readFile(new URL("../../.gitignore", import.meta.url), "utf8")
 ]);
 
-for (const service of ["app-server", "realtime-server", "ai-worker", "workspace-indexer-worker"]) {
-  assert.match(moduleMain, new RegExp(`${service}\\s*=\\s*\\{`));
+function localMapKeys(source, localName) {
+  const localMap = source.match(new RegExp(`\\n  ${localName}\\s*=\\s*\\{([\\s\\S]*?)\\n  \\}`));
+  assert.ok(localMap, `${localName} local map must exist`);
+  return [...localMap[1].matchAll(/^ {4}([a-z0-9-]+)\s*=\s*\{/gm)]
+    .map((match) => match[1])
+    .sort();
 }
-for (const dlq of ["ai-jobs-dlq", "workspace-indexing-dlq"]) {
-  assert.match(moduleMain, new RegExp(dlq));
-}
+
+assert.deepEqual(localMapKeys(moduleMain, "running_task_services"), [
+  "ai-worker",
+  "app-server",
+  "realtime-server",
+  "workspace-indexer-worker"
+]);
+assert.deepEqual(localMapKeys(moduleMain, "healthy_host_targets"), ["app-server", "realtime-server"]);
+assert.deepEqual(localMapKeys(moduleMain, "dlq_targets"), ["ai-worker", "workspace-indexer-worker"]);
+assert.match(moduleMain, /ai-jobs-dlq/);
+assert.match(moduleMain, /workspace-indexing-dlq/);
+assert.match(gitignore, /^\*\.tfplan$/m);
 
 assert.match(moduleMain, /resource "aws_cloudwatch_metric_alarm" "running_task_count"/);
 assert.match(moduleMain, /metric_name\s*=\s*"RunningTaskCount"/);

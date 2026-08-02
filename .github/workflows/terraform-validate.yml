@@ -29,6 +29,9 @@ jobs:
       - name: Verify Terraform PR plan policy
         run: node infra/tests/terraform-pr-plan-policy.test.mjs
 
+      - name: Verify core service observability contract
+        run: node infra/tests/core-services-observability.test.mjs
+
       - name: Verify production domain cutover contract
         run: |
           node infra/tests/cloudfront-frontend-viewer-request.test.mjs
