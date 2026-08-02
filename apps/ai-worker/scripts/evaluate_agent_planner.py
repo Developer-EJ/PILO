@@ -375,7 +375,7 @@ def main() -> None:
             args.suite,
             args.meeting_catalog,
             args.tool_capability_catalog,
-            args.multiturn_catalog,
+            args.workflow_catalog or args.multiturn_catalog,
         ),
         **_registry_binding(args.registry_snapshot),
         "sourceRevision": _git_revision(),

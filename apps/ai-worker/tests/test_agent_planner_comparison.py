@@ -304,6 +304,21 @@ def test_agent_performance_snapshot_reports_absolute_workflow_metrics() -> None:
     assert "passed" not in snapshot
 
 
+def test_agent_performance_snapshot_accepts_a_complete_catalog_above_minimum() -> None:
+    current = workflow_report(
+        34,
+        source_revision="main-revision",
+        latency_ms=123.5,
+        provider_tokens=456,
+        variant="agent_workflow",
+        case_count=34,
+    )
+
+    snapshot = build_agent_performance_snapshot([current])
+
+    assert snapshot["uniqueScenarioCount"] == 34
+
+
 def test_snapshot_accepts_different_task_and_execution_contract_rates() -> None:
     current = workflow_report(
         31,

@@ -1,6 +1,6 @@
 {
   "version": "agent-workflow-regression:v3",
-  "scenarioCount": 31,
+  "scenarioCount": 34,
   "workflowCases": [
     {
       "id": "meeting_report_list", "category": "single_tool", "evaluationDomains": ["meeting"],
