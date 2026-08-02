@@ -68,9 +68,11 @@ ECS 서비스에서도 Realtime Server task 2개가 정상 실행 중인 것을 
 
 ![개선 후 Realtime Server task 2개 실행 상태](../assets/realtime-checkpoint-conflict/aws-after-ecs-two-tasks.png)
 
-## 추가 회귀 테스트: 로컬 Docker 2노드
+## 자동화된 2노드 통합 테스트
 
-개발 ECS 수동 검증과 별도로, PostgreSQL·Redis·App Server·Realtime Server 2개 프로세스를 연결한 로컬 Docker 통합 테스트를 실행했다. AWS 검증 수치와 합산하지 않은 별도 반복 검증이다.
+개발 ECS 검증은 task 2개·Redis 연결·health check·CloudWatch 로그처럼 **배포 환경이 실제로 연결되는지** 확인하는 데 초점을 둔다. 반면 같은 편집 시나리오를 수동으로 여러 번 반복하며 저장 결과를 정확히 세기는 어렵다.
+
+그래서 PostgreSQL·Redis·App Server·Realtime Server 2개 프로세스·WebSocket·Yjs를 함께 실행하는 로컬 Docker 통합 테스트를 만들었다. App Server 저장 API를 mock하지 않고 실제 컴포넌트를 연결해, 5개 세션의 입력·저장·재접속 과정을 3회 반복하고 결과를 자동으로 검사한다. 아래 수치는 AWS 검증의 1,500개와 합산하지 않은 별도 검증 결과다.
 
 | 항목 | 결과 |
 |---|---|
@@ -82,7 +84,7 @@ ECS 서비스에서도 Realtime Server task 2개가 정상 실행 중인 것을 
 
 ![로컬 2노드 반복 검증 결과](../assets/realtime-checkpoint-conflict/local-two-node-report.png)
 
-이 검증은 두 Realtime Server 인스턴스의 정상 운영과 graceful shutdown 경로를 대상으로 한다. 장시간 soak, 강제 종료, 네트워크 파티션, 모든 규모의 autoscaling에서 무손실을 보장한다는 주장은 포함하지 않는다.
+이 통합 테스트는 두 Realtime Server 인스턴스의 정상 운영과 graceful shutdown 경로를 반복 검증하지만, ECS 배포 설정이나 AWS 네트워크 특성까지 대신 검증하지는 않는다. 장시간 soak, 강제 종료, 네트워크 파티션, 모든 규모의 autoscaling에서 무손실을 보장한다는 주장도 포함하지 않는다.
 
 ## 코드와 테스트 근거
 
