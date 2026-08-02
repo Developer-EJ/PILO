@@ -38,6 +38,16 @@ flowchart LR
 - **문서별 저장 직렬화**: checkpoint를 시작하기 전에 Redis의 문서별 Lease를 획득한다. Lease를 얻은 서버만 저장하고, 다른 서버는 Lease가 해제된 뒤 최신 상태를 기준으로 저장한다. 서로 다른 문서는 병렬로 처리할 수 있다.
 - **저장 안정성 보강**: 변경사항은 1초 동안 묶어 checkpoint하고, 예외적으로 `409 Conflict`가 발생하면 최신 snapshot을 병합한 뒤 새 버전으로 한 번 재시도한다. 종료 전에는 대기 중인 checkpoint를 처리하며, Redis 동기화 연결이 비정상이면 health check를 실패시켜 안전하지 않은 다중 서버 상태가 계속 서비스되지 않도록 했다.
 
+### Pub/Sub, Lease, 재시도를 분리한 이유
+
+세 장치는 비슷해 보이지만 해결하는 문제가 다르다.
+
+- Redis Pub/Sub은 **두 서버의 문서 메모리를 맞추는 역할**이다. 이것만으로는 두 서버가 같은 시점에 checkpoint를 시작하는 것을 막지 못한다.
+- 문서별 Lease는 **저장 요청의 순서를 정하는 역할**이다. 하지만 Lease만으로는 서로 다른 서버에 연결된 사용자의 편집 내용이 실시간으로 전달되지 않는다.
+- App Server의 version 검증과 최신 snapshot 병합·재시도는 Lease의 만료나 예외 상황에서도 남을 수 있는 충돌에 대한 **마지막 방어선**이다.
+
+따라서 여러 서버를 단순히 같은 애플리케이션의 복제본으로 두는 대신, 문서 상태 동기화와 영속화 순서를 각각 별도의 책임으로 나누었다.
+
 ## 개발 ECS 검증
 
 | 항목 | 검증 조건 및 결과 |
@@ -74,7 +84,7 @@ ECS 서비스에서도 Realtime Server task 2개가 정상 실행 중인 것을 
 
 이 검증은 두 Realtime Server 인스턴스의 정상 운영과 graceful shutdown 경로를 대상으로 한다. 장시간 soak, 강제 종료, 네트워크 파티션, 모든 규모의 autoscaling에서 무손실을 보장한다는 주장은 포함하지 않는다.
 
-## 구현 근거
+## 코드와 테스트 근거
 
 - [구현 PR #1797](https://github.com/Developer-EJ/PILO/pull/1797)
 - [Redis 기반 문서 동기화 및 Lease](../../apps/realtime-server/src/documents/document-redis-sync.ts)
@@ -83,9 +93,3 @@ ECS 서비스에서도 Realtime Server task 2개가 정상 실행 중인 것을 
 - [Redis 동기화 테스트](../../apps/realtime-server/src/documents/document-redis-sync.test.mjs)
 - [checkpoint 테스트](../../apps/realtime-server/src/documents/document-checkpoint.service.test.mjs)
 - [2노드 통합 테스트 러너](../../apps/realtime-server/scripts/document-two-node-scaling.e2e.mjs)
-
-## 이력서용 요약
-
-- **문제**: Realtime Server 수평 확장 시 인스턴스별 저장 큐가 독립적으로 동작해 동일 문서 checkpoint가 `409 Conflict`를 일으킬 수 있는 구조
-- **해결**: Redis Pub/Sub과 문서별 분산 Lease로 서버 간 변경사항을 동기화하고 checkpoint 저장을 직렬화
-- **결과**: 개발 ECS Realtime Server 2대·5개 동시 세션에서 1,500개 변경 입력 동안 `409 Conflict` 및 checkpoint 저장 실패 0건, 재접속 후 변경사항 전체 유지
