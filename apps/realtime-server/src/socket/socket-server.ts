@@ -130,6 +130,7 @@ import {
   createRealtimeDatabase,
   type RealtimeDatabase,
 } from "../database/database";
+import { createRedisLocalEmitter } from "../redis/redis-local-emitter";
 import { createSocketIoRedisAdapter } from "../redis/redis-pubsub";
 import {
   isPrReviewDecisionUpdatedEvent,
@@ -216,18 +217,26 @@ function readConflictDraftLockId(shapeId: string): {
 }
 
 function emitConflictDraftLockReleases(
-  io: Server,
+  emitToRoom: (
+    roomName: string,
+    eventName: string,
+    payload: unknown,
+  ) => void,
   payload: { canvasId: string; workspaceId: string; ownerUserId: string; shapeIds: string[] }
 ) {
   for (const shapeId of payload.shapeIds) {
     const draft = readConflictDraftLockId(shapeId);
     if (!draft) continue;
-    io.to(createCanvasRoomName(payload)).emit(PR_REVIEW_CONFLICT_DRAFT_LOCK_RELEASED_EVENT, {
-      ...draft,
-      canvasId: payload.canvasId,
-      workspaceId: payload.workspaceId,
-      ownerUserId: payload.ownerUserId
-    });
+    emitToRoom(
+      createCanvasRoomName(payload),
+      PR_REVIEW_CONFLICT_DRAFT_LOCK_RELEASED_EVENT,
+      {
+        ...draft,
+        canvasId: payload.canvasId,
+        workspaceId: payload.workspaceId,
+        ownerUserId: payload.ownerUserId
+      },
+    );
   }
 }
 
@@ -508,6 +517,7 @@ export async function createRealtimeSocketServer({
     createWorkspacePresenceAccessService(database);
   const workspacePresenceService = createWorkspacePresenceService();
   const membershipRevocationFence = createWorkspaceMembershipRevocationFence();
+  const emitRedisEventLocally = createRedisLocalEmitter(io);
   const chatAccessService = createChatAccessService(database);
   const chatFanOut = createChatFanOut({ database, io });
   const chatMembershipRevocationHandler =
@@ -521,7 +531,7 @@ export async function createRealtimeSocketServer({
   const classicCanvasMembershipRevocationHandler =
     createClassicCanvasMembershipRevocationHandler({
       emitLockReleases(payload) {
-        emitConflictDraftLockReleases(io, payload);
+        emitConflictDraftLockReleases(emitRedisEventLocally, payload);
       },
       io,
       presenceService,
@@ -548,9 +558,7 @@ export async function createRealtimeSocketServer({
       service: workspacePresenceService,
     });
   const screenShareFanOut = createScreenShareFanOut({
-    emit(room, event, payload) {
-      io.to(room).emit(event, payload);
-    },
+    emit: emitRedisEventLocally,
   });
   const chatSubscriptionWork = createChatSubscriptionWorkQueue({
     onRejected() {
@@ -561,26 +569,20 @@ export async function createRealtimeSocketServer({
     accessService: boardAccessService,
   });
   const boardInvalidationFanOut = createBoardInvalidationFanOut({
-    emitToRoom(roomName, event, payload) {
-      io.to(roomName).emit(event, payload);
-    },
+    emitToRoom: emitRedisEventLocally,
   });
   const boardSourceRoomService = createBoardSourceRoomService({
     accessService: boardAccessService,
   });
   const boardSourceFanOut = createBoardSourceFanOut({
-    emitToRoom(roomName, event, payload) {
-      io.to(roomName).emit(event, payload);
-    },
+    emitToRoom: emitRedisEventLocally,
   });
   const githubSourceAccessService = createGithubSourceAccessService(database);
   const githubSourceRoomService = createGithubSourceRoomService({
     accessService: githubSourceAccessService,
   });
   const githubSourceFanOut = createGithubSourceFanOut({
-    emitToRoom(roomName, event, payload) {
-      io.to(roomName).emit(event, payload);
-    },
+    emitToRoom: emitRedisEventLocally,
   });
   const unsubscribeCanvasOperations = redisAdapter
     ? await redisAdapter.subscribe(CANVAS_OPERATION_REDIS_CHANNEL, (payload) => {
@@ -589,7 +591,8 @@ export async function createRealtimeSocketServer({
           return;
         }
 
-        io.to(createCanvasRoomName(payload)).emit(
+        emitRedisEventLocally(
+          createCanvasRoomName(payload),
           canvasServerEvents.operation,
           payload,
         );
@@ -598,7 +601,7 @@ export async function createRealtimeSocketServer({
   const unsubscribeSqlErdOperations = redisAdapter
     ? await redisAdapter.subscribe(SQL_ERD_OPERATION_REDIS_CHANNEL, (payload) => {
         if (!relaySqlErdOperation(payload, (roomName, event, operation) => {
-          io.to(roomName).emit(event, operation);
+          emitRedisEventLocally(roomName, event, operation);
         })) {
           console.error("SQLtoERD operation Redis payload is invalid", payload);
         }
@@ -612,7 +615,11 @@ export async function createRealtimeSocketServer({
         }
 
         const { workspaceId, ...event } = payload;
-        io.to(createMeetingRoomName(workspaceId)).emit(meetingServerEvents.reportUpdated, event);
+        emitRedisEventLocally(
+          createMeetingRoomName(workspaceId),
+          meetingServerEvents.reportUpdated,
+          event,
+        );
       })
     : null;
   const unsubscribeMeetingStates = redisAdapter
@@ -633,9 +640,10 @@ export async function createRealtimeSocketServer({
         }
 
         const { workspaceId, ...event } = payload;
-        io.to(createMeetingRoomName(workspaceId)).emit(
+        emitRedisEventLocally(
+          createMeetingRoomName(workspaceId),
           meetingServerEvents.stateUpdated,
-          event
+          event,
         );
       })
     : null;
@@ -646,11 +654,12 @@ export async function createRealtimeSocketServer({
           return;
         }
         const { recipientUserId, ...event } = payload;
-        io.to(createMeetingNotificationUserRoomName(recipientUserId)).emit(
+        emitRedisEventLocally(
+          createMeetingNotificationUserRoomName(recipientUserId),
           event.event === "meeting:notification:updated"
             ? meetingServerEvents.notificationUpdated
             : meetingServerEvents.notificationCreated,
-          event
+          event,
         );
       })
     : null;
@@ -738,7 +747,8 @@ export async function createRealtimeSocketServer({
           return;
         }
 
-        io.to(createCanvasRoomName(payload)).emit(
+        emitRedisEventLocally(
+          createCanvasRoomName(payload),
           PR_REVIEW_DECISION_UPDATED_EVENT,
           payload,
         );
@@ -751,7 +761,8 @@ export async function createRealtimeSocketServer({
           return;
         }
 
-        io.to(createCanvasRoomName(payload)).emit(
+        emitRedisEventLocally(
+          createCanvasRoomName(payload),
           PR_REVIEW_ROOM_DELETED_EVENT,
           payload,
         );
@@ -764,7 +775,11 @@ export async function createRealtimeSocketServer({
           return;
         }
 
-        io.to(createCanvasRoomName(payload)).emit(payload.event, payload);
+        emitRedisEventLocally(
+          createCanvasRoomName(payload),
+          payload.event,
+          payload,
+        );
       })
     : null;
 
@@ -832,7 +847,12 @@ export async function createRealtimeSocketServer({
 
     registerCanvasSocketHandlers({
       emitLockReleases(payload) {
-        emitConflictDraftLockReleases(io, payload);
+        emitConflictDraftLockReleases(
+          (roomName, eventName, eventPayload) => {
+            io.to(roomName).emit(eventName, eventPayload);
+          },
+          payload,
+        );
       },
       io,
       presenceService,

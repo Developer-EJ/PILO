@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 
 from app.agent_planner_comparison import (
+    MULTITURN_SNAPSHOT_FORMAT,
+    SNAPSHOT_FORMAT,
     build_agent_performance_snapshot,
     build_multiturn_context_snapshot,
 )
@@ -16,6 +18,7 @@ def main() -> int:
     )
     parser.add_argument("--report", action="append", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--summary-output", type=Path)
     args = parser.parse_args()
 
     reports = [_load(path) for path in args.report]
@@ -29,7 +32,120 @@ def main() -> int:
         json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    if args.summary_output is not None:
+        args.summary_output.parent.mkdir(parents=True, exist_ok=True)
+        args.summary_output.write_text(
+            render_snapshot_summary(snapshot) + "\n",
+            encoding="utf-8",
+        )
     return 0
+
+
+def render_snapshot_summary(snapshot: dict[str, object]) -> str:
+    snapshot_format = snapshot.get("format")
+    if snapshot_format == SNAPSHOT_FORMAT:
+        return _render_agent_workflow_summary(snapshot)
+    if snapshot_format == MULTITURN_SNAPSHOT_FORMAT:
+        return _render_multiturn_summary(snapshot)
+    raise ValueError(f"Unsupported evaluation snapshot format: {snapshot_format}")
+
+
+def _render_agent_workflow_summary(snapshot: dict[str, object]) -> str:
+    aggregate = _object(snapshot.get("aggregate"), "Missing aggregate metrics")
+    safety = _object(snapshot.get("safetyViolations"), "Missing safety metrics")
+    revision = _string(snapshot.get("sourceRevision"), "Missing source revision")
+    scenario_count = _integer(snapshot.get("uniqueScenarioCount"), "Invalid scenario count")
+    attempts = _integer(aggregate.get("attempts"), "Invalid attempt count")
+    passed_attempts = _integer(aggregate.get("passedAttempts"), "Invalid passed attempt count")
+    contract_passes = _integer(
+        aggregate.get("executionContractPassAttempts"),
+        "Invalid execution contract pass count",
+    )
+    task_success = _percent(snapshot.get("taskSuccessRate"))
+    contract_rate = _percent(snapshot.get("executionContractPassRate"))
+    tool_accuracy = _percent(aggregate.get("toolSelectionAccuracy"))
+    input_accuracy = _percent(aggregate.get("requiredInputAccuracy"))
+    safety_count = _integer(safety.get("count"), "Invalid safety violation count")
+    mean_latency = _number(snapshot.get("meanLatencyMs"), "Invalid mean latency")
+    return "\n".join(
+        (
+            "## Agent Workflow Evaluation",
+            "",
+            "| Metric | Result |",
+            "| --- | ---: |",
+            f"| Revision | `{revision}` |",
+            f"| Scenarios | {scenario_count} |",
+            f"| Attempts | {attempts} |",
+            f"| Task success | {passed_attempts} / {attempts} ({task_success}) |",
+            f"| Execution contract | {contract_passes} / {attempts} ({contract_rate}) |",
+            f"| Tool selection accuracy | {tool_accuracy} |",
+            f"| Required-input accuracy | {input_accuracy} |",
+            f"| Safety violations | {safety_count} |",
+            f"| Mean latency | {mean_latency:,.2f} ms |",
+        )
+    )
+
+
+def _render_multiturn_summary(snapshot: dict[str, object]) -> str:
+    metadata = _object(snapshot.get("metadata"), "Missing snapshot metadata")
+    metrics = _object(snapshot.get("metrics"), "Missing multi-turn metrics")
+    revision = _string(metadata.get("sourceRevision"), "Missing source revision")
+    conversation_count = _integer(snapshot.get("conversationCount"), "Invalid conversation count")
+    task_success = _percent(metrics.get("koreanMultiTurnContextTaskSuccessRate"))
+    follow_up_tool = _percent(metrics.get("followUpToolSelectionAccuracy"))
+    context_argument = _percent(metrics.get("priorContextArgumentAccuracy"))
+    context_resolution = _percent(metrics.get("multiTurnContextResolutionRate"))
+    multi_turn_tool = _percent(metrics.get("multiTurnToolSelectionAccuracy"))
+    partial = _percent(metrics.get("partialRate"))
+    inconclusive = _percent(metrics.get("inconclusiveRate"))
+    return "\n".join(
+        (
+            "## Korean Multi-turn Evaluation",
+            "",
+            "| Metric | Result |",
+            "| --- | ---: |",
+            f"| Revision | `{revision}` |",
+            f"| Conversations | {conversation_count} |",
+            f"| Task success | {task_success} |",
+            f"| Follow-up Tool selection | {follow_up_tool} |",
+            f"| Prior-context argument accuracy | {context_argument} |",
+            f"| Context resolution | {context_resolution} |",
+            f"| Multi-turn Tool selection | {multi_turn_tool} |",
+            f"| Partial | {partial} |",
+            f"| Inconclusive | {inconclusive} |",
+        )
+    )
+
+
+def _object(value: object, message: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError(message)
+    return value
+
+
+def _string(value: object, message: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(message)
+    return value
+
+
+def _integer(value: object, message: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(message)
+    return value
+
+
+def _number(value: object, message: str) -> float:
+    if not isinstance(value, int | float) or isinstance(value, bool) or value < 0:
+        raise ValueError(message)
+    return float(value)
+
+
+def _percent(value: object) -> str:
+    rate = _number(value, "Invalid evaluation rate")
+    if rate > 1:
+        raise ValueError("Invalid evaluation rate")
+    return f"{rate * 100:.2f}%"
 
 
 def _load(path: Path) -> dict[str, object]:

@@ -23,6 +23,11 @@ type SqlErdMembershipSocket = {
   disconnect: (close?: boolean) => unknown;
   id: string;
   leave: (roomName: string) => Promise<unknown> | unknown;
+  local: {
+    to: (roomName: string) => {
+      emit: (event: string, payload: unknown) => unknown;
+    };
+  };
   to: (roomName: string) => {
     emit: (event: string, payload: unknown) => unknown;
   };
@@ -49,6 +54,8 @@ function isSqlErdMembershipSocket(
     typeof value.id === "string" &&
     typeof value.disconnect === "function" &&
     typeof value.leave === "function" &&
+    isRecord(value.local) &&
+    typeof value.local.to === "function" &&
     typeof value.to === "function"
   );
 }
@@ -69,13 +76,13 @@ function emitPresenceClearResult(
 ) {
   if (clearResult.kind === "update") {
     socket
-      .to(createSqlErdRoomName(clearResult.presence))
+      .local.to(createSqlErdRoomName(clearResult.presence))
       .emit(sqlErdServerEvents.presenceUpdate, clearResult.presence);
     return;
   }
 
   socket
-    .to(createSqlErdRoomName(clearResult.payload))
+    .local.to(createSqlErdRoomName(clearResult.payload))
     .emit(sqlErdServerEvents.presenceLeave, clearResult.payload);
 }
 

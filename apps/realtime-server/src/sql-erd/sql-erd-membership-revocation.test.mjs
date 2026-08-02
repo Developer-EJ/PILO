@@ -46,6 +46,7 @@ function createSocket(
       sqlErdRoomsByName,
     },
     disconnectCalls: [],
+    clusterEmittedToRooms: [],
     emittedToRooms: [],
     id: `sql-erd-revocation-socket-${nextSocketId++}`,
     leaveCalls: [],
@@ -62,10 +63,19 @@ function createSocket(
       }
       socket.rooms.delete(roomName);
     },
+    local: {
+      to(roomName) {
+        return {
+          emit(event, payload) {
+            socket.emittedToRooms.push({ event, payload, roomName });
+          },
+        };
+      },
+    },
     to(roomName) {
       return {
         emit(event, payload) {
-          socket.emittedToRooms.push({ event, payload, roomName });
+          socket.clusterEmittedToRooms.push({ event, payload, roomName });
         },
       };
     },
@@ -165,6 +175,10 @@ test("membership.revoked는 대상 사용자의 SQLtoERD room과 presence, sourc
       roomName,
     },
   ]);
+  assert.deepEqual(
+    [...firstTab.clusterEmittedToRooms, ...secondTab.clusterEmittedToRooms],
+    [],
+  );
 
   const operationRecipients = [...io.sockets.sockets.values()]
     .filter((socket) => socket.rooms.has(roomName))

@@ -13,6 +13,7 @@ import {
   consumeMeetingConnectionAction,
   enqueueMeetingConnectionAction
 } from "./stores/meeting-connection-action-store.ts";
+await import("./utils/meeting-report-refresh-coalescer.test.mjs");
 
 test("Meeting은 room 선택과 document 위치만 복원하고 회의에 입장하지 않는다", async () => {
   const location = createMeetingWorkspaceLocation("room-1", { clientHeight: 500, clientWidth: 800, scrollHeight: 1500, scrollLeft: 0, scrollTop: 250, scrollWidth: 800 });

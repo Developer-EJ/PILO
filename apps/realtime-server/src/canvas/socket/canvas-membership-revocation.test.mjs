@@ -74,6 +74,7 @@ function createHandler(sockets, { failLeaveRoom = null } = {}) {
   const clearedLocks = [];
   const clearedPresence = [];
   const clearedPreviews = [];
+  const clusterEmitted = [];
   const emitted = [];
 
   for (const socket of sockets) {
@@ -91,13 +92,22 @@ function createHandler(sockets, { failLeaveRoom = null } = {}) {
       emitted.push({ event: "lock-release", payload });
     },
     io: {
+      local: {
+        to(roomName) {
+          return {
+            emit(event, payload) {
+              emitted.push({ event, payload, roomName });
+            },
+          };
+        },
+      },
       sockets: {
         sockets: new Map(sockets.map((socket) => [socket.id, socket])),
       },
       to(roomName) {
         return {
           emit(event, payload) {
-            emitted.push({ event, payload, roomName });
+            clusterEmitted.push({ event, payload, roomName });
           },
         };
       },
@@ -115,6 +125,7 @@ function createHandler(sockets, { failLeaveRoom = null } = {}) {
           userId: revokedUserId,
         });
       },
+      unregisterRoomParticipant() {},
     },
     shapeLockService: {
       async clearRoomLocks(socketId, ownerUserId, room) {
@@ -132,6 +143,7 @@ function createHandler(sockets, { failLeaveRoom = null } = {}) {
 
   return {
     checkpointRevocations,
+    clusterEmitted,
     clearedLocks,
     clearedPresence,
     clearedPreviews,
@@ -204,6 +216,11 @@ test("evicts only revoked user's classic Canvas rooms in the target Workspace", 
   assert.deepEqual(
     state.clearedLocks.map(({ room }) => room),
     [classicRoom],
+  );
+  assert.deepEqual(state.clusterEmitted, []);
+  assert.deepEqual(
+    state.emitted.map(({ event }) => event),
+    ["canvas:presence:leave", "canvas:shape:preview:clear"],
   );
 });
 

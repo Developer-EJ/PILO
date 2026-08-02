@@ -19,6 +19,7 @@ from app.agent_multiturn_context_evaluation import (
     load_multiturn_catalog,
 )
 from app.agent_outcome_judge import OpenAiMultiTurnJudge
+from app.agent_planner_comparison import reported_suite_version
 from app.agent_planner_evaluation import (
     attach_tool_capability_catalog,
     build_evaluation_input_hashes,
@@ -63,6 +64,11 @@ def main() -> None:
         help="Path to the Meeting regression capability catalog JSON.",
     )
     parser.add_argument(
+        "--workflow-catalog",
+        type=Path,
+        help="Path to the Agent workflow scenario catalog JSON.",
+    )
+    parser.add_argument(
         "--multiturn-catalog",
         type=Path,
         help="Path to the frozen multi-turn context benchmark catalog JSON.",
@@ -94,6 +100,10 @@ def main() -> None:
         ),
         default="canonical",
         help="Meeting regression prompt set to evaluate when --meeting-catalog is provided.",
+    )
+    parser.add_argument(
+        "--report-variant",
+        help="Public variant name recorded in the evaluation report.",
     )
     parser.add_argument("--current-date", required=True, help="Planner current date in YYYY-MM-DD.")
     parser.add_argument("--timezone", default="Asia/Seoul")
@@ -271,9 +281,9 @@ def main() -> None:
     elif workflow_mode:
         assert router is not None
         assert args.meeting_variant == "multi_tool"
-        if args.meeting_catalog is None:
-            raise SystemExit("multi_tool evaluation requires --meeting-catalog")
-        scenarios = load_workflow_scenarios(args.meeting_catalog)
+        if args.workflow_catalog is None:
+            raise SystemExit("multi_tool evaluation requires --workflow-catalog")
+        scenarios = load_workflow_scenarios(args.workflow_catalog)
         workflow_results = evaluate_workflow_suite(
             planner,
             router,
@@ -328,7 +338,7 @@ def main() -> None:
         "currentDate": args.current_date,
         "timezone": args.timezone,
         "repetitions": args.repetitions,
-        "suiteVersion": suite.version,
+        "suiteVersion": reported_suite_version(suite.version, args.report_variant),
         "toolSchemaVersion": suite.job.tool_schema_version,
         "shadowRetrieval": args.shadow_retrieval,
         "compareShadowRetrieval": args.compare_shadow_retrieval,
@@ -365,7 +375,7 @@ def main() -> None:
             args.suite,
             args.meeting_catalog,
             args.tool_capability_catalog,
-            args.multiturn_catalog,
+            args.workflow_catalog or args.multiturn_catalog,
         ),
         **_registry_binding(args.registry_snapshot),
         "sourceRevision": _git_revision(),

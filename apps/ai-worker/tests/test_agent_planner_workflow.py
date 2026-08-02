@@ -1,6 +1,8 @@
+import json
 from pathlib import Path
 
 WORKFLOW_PATH = Path(__file__).parents[3] / ".github" / "workflows" / "evaluate-agent-planner.yml"
+WORKFLOW_CATALOG_PATH = Path(__file__).parents[1] / "evals" / "agent_workflow_catalog_v1.json"
 EVALUATOR_SCRIPT_PATH = Path(__file__).parents[1] / "scripts" / "evaluate_agent_planner.py"
 COMPARISON_SCRIPT_PATH = (
     Path(__file__).parents[1] / "scripts" / "compare_agent_planner_evaluations.py"
@@ -31,11 +33,19 @@ def test_multi_tool_variant_uses_sequential_workflow_evaluator() -> None:
     script = EVALUATOR_SCRIPT_PATH.read_text(encoding="utf-8")
 
     assert 'args.meeting_variant == "multi_tool"' in script
+    assert '"--workflow-catalog"' in script
+    assert "load_workflow_scenarios(args.workflow_catalog)" in script
     assert "evaluate_workflow_suite(" in script
     assert "build_workflow_evaluation_report(" in script
     assert '"evaluatorSha256": _evaluator_sha256()' in script
     assert 'Path("app/agent_workflow_evaluation.py")' in script
     assert 'Path("app/agent_planner_comparison.py")' in script
+
+
+def test_workflow_evaluation_records_the_workflow_catalog_hash() -> None:
+    script = EVALUATOR_SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "args.workflow_catalog or args.multiturn_catalog" in script
 
 
 def test_multiturn_variant_is_compared_without_the_legacy_readiness_gate() -> None:
@@ -73,7 +83,37 @@ def test_evaluation_workflow_supports_main_snapshot_without_comparison_gate() ->
     assert "agent-performance-snapshot-${{ needs.prepare.outputs.target_sha }}" in workflow
     assert "inputs.mode == 'snapshot'" in workflow
     assert "inputs.mode == 'compare'" in workflow
-    assert "agent-evaluation-target-multi_turn_context" in workflow
-    assert "target-meeting-multi_turn_context-evaluation.json" in workflow
+    assert "agent-evaluation-target-${{ needs.prepare.outputs.snapshot_scope }}" in workflow
+    assert "target-meeting-${SNAPSHOT_SCOPE}-evaluation.json" in workflow
     assert "inputs.target_sha || github.sha" in workflow
     assert "target SHA must match the current main revision" in workflow
+
+
+def test_snapshot_scope_can_run_agent_workflow_and_publish_summary() -> None:
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "snapshot_scope:" in workflow
+    assert "default: multi_turn_context" in workflow
+    assert "- agent_workflow" in workflow
+    assert "SNAPSHOT_SCOPE: ${{ inputs.snapshot_scope }}" in workflow
+    assert "echo 'variants=[\"agent_workflow\"]'" in workflow
+    assert "agent_workflow_catalog_v1.json" in workflow
+    assert "agent-workflow-catalog.json" in workflow
+    assert "matrix.variant == 'multi_turn_context'" in workflow
+    assert 'EVALUATION_VARIANT="multi_tool"' in workflow
+    assert (
+        '--meeting-catalog "$RUNNER_TEMP/prepared/meeting-agent-capability-catalog.json"'
+        in workflow
+    )
+    assert '--meeting-variant "$EVALUATION_VARIANT"' in workflow
+    assert '--report-variant "$VARIANT"' in workflow
+    assert '--workflow-catalog "$RUNNER_TEMP/prepared/agent-workflow-catalog.json"' in workflow
+    assert "agent-evaluation-target-${{ needs.prepare.outputs.snapshot_scope }}" in workflow
+    assert "target-meeting-${SNAPSHOT_SCOPE}-evaluation.json" in workflow
+    assert '--summary-output "$GITHUB_STEP_SUMMARY"' in workflow
+
+
+def test_agent_workflow_catalog_declares_its_actual_case_count() -> None:
+    catalog = json.loads(WORKFLOW_CATALOG_PATH.read_text(encoding="utf-8"))
+
+    assert catalog["scenarioCount"] == len(catalog["workflowCases"])

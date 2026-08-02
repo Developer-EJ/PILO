@@ -90,6 +90,10 @@ const redisPubSub = await readFile(
   new URL("../src/redis/redis-pubsub.ts", import.meta.url),
   "utf8"
 );
+const redisLocalEmitter = await readFile(
+  new URL("../src/redis/redis-local-emitter.ts", import.meta.url),
+  "utf8"
+);
 const socketServerSource = await readFile(
   new URL("../src/socket/socket-server.ts", import.meta.url),
   "utf8"
@@ -346,6 +350,14 @@ assert.match(redisPubSub, /stateClient/);
 assert.match(redisPubSub, /NX: true/);
 assert.match(redisPubSub, /PX: options\.px/);
 assert.match(redisPubSub, /subscribe\(channel/);
+assert.match(redisLocalEmitter, /io\.local\.to\(roomName\)\.emit\(eventName, payload\)/);
+
+const redisSubscriptionBlock = socketServerSource.slice(
+  socketServerSource.indexOf("const unsubscribeCanvasOperations"),
+  socketServerSource.indexOf("io.use(")
+);
+assert.match(redisSubscriptionBlock, /emitRedisEventLocally/);
+assert.doesNotMatch(redisSubscriptionBlock, /\bio\.to\(/);
 
 await import("./canvas-access.test.mjs");
 await import("./sql-erd-presence.test.mjs");
@@ -362,6 +374,7 @@ await import("../src/chat/chat-events.test.mjs");
 await import("../src/chat/chat-membership-revocation.test.mjs");
 await import("../src/meeting/meeting-membership-revocation.test.mjs");
 await import("../src/meeting/meeting-socket-handlers.test.mjs");
+await import("../src/redis/redis-local-emitter.test.mjs");
 await import("../src/chat/chat-subscription-work.test.mjs");
 await import("../src/chat/chat-socket-lifecycle.test.mjs");
 await import("../src/canvas/socket/canvas-membership-revocation.test.mjs");
