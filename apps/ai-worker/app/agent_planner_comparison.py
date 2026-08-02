@@ -293,10 +293,11 @@ def build_agent_performance_snapshot(
         raise ValueError("Snapshot requires exactly the agent_workflow variant")
 
     report = reports_by_variant["agent_workflow"]
+    total_cases = report.get("totalCases")
     if (
         not isinstance(report.get("workflowEvaluation"), dict)
-        or not isinstance(report.get("totalCases"), int)
-        or report["totalCases"] < SNAPSHOT_SCENARIO_COUNT
+        or not isinstance(total_cases, int)
+        or total_cases < SNAPSHOT_SCENARIO_COUNT
     ):
         raise ValueError("Snapshot requires at least 31 complete workflow scenarios")
     _validate_complete_workflow_attempts(report)
@@ -307,7 +308,7 @@ def build_agent_performance_snapshot(
         if not isinstance(scenario_id, str) or not scenario_id:
             raise ValueError("Invalid workflow scenario id")
         scenario_attempts.setdefault(scenario_id, []).append(result)
-    if len(scenario_attempts) != SNAPSHOT_SCENARIO_COUNT:
+    if len(scenario_attempts) != total_cases:
         raise ValueError("Snapshot requires at least 31 complete workflow scenarios")
 
     scenario_success: dict[str, float] = {}
