@@ -1,6 +1,7 @@
 <div align="center">
 
 # PILO
+<img width="2525" height="1200" alt="image" src="https://github.com/user-attachments/assets/6d1b6c28-9832-4664-8124-aa4336157a69" />
 
 ### 개발팀의 모든 흐름을 하나의 Workspace로
 
