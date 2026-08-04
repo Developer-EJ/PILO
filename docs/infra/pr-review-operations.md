@@ -135,6 +135,34 @@ POST /api/v1/workspaces/{workspaceId}/github/review-sessions/{failedSessionId}/r
 이미 같은 사용자·PR의 analyzing session이 있으면 중복 Job 대신 기존 활성 session을
 반환한다. failed가 아닌 session은 `409 Conflict`, 존재하지 않으면 `404 Not Found`다.
 
+## 통제된 Worker 장애 주입 검증
+
+2026-07-31에 운영 `SqsAiJobWorker`, `JobDispatcher`, `PrReviewAnalysisProcessor`를 그대로
+호출하고 SQS, App Server handoff, AI provider 경계만 메모리 구현으로 대체한 통합 검증을
+수행했다. PR 30개가 필요한 검증은 아니며, 서로 다른 ID를 가진 독립 Job 30개를 사용한다.
+
+```bash
+cd apps/ai-worker
+python scripts/run_pr_review_fault_injection.py
+```
+
+| 장애 경계 | Job 수 | 결과 | provider 호출 |
+| --- | ---: | --- | ---: |
+| provider 호출 직전 | 10 | 10건 모두 재수신 후 `SUCCEEDED` | 10 |
+| provider 응답 후, 결과 저장 직전 | 10 | 10건 모두 재수신 후 `SUCCEEDED` | 20 |
+| 결과 저장 후, SQS 삭제 직전 | 10 | 10건 모두 완료 결과를 보존하고 메시지 삭제 | 10 |
+
+전체 30개 Job에 한 번씩 중단을 주입해 delivery 60회가 발생했다. 최종 결과는
+`30/30 SUCCEEDED`, 유실 Job 0건, 중복 저장 결과 0건, 비정상 상태 잔류 0건, queue 잔류
+0건이다. 개별 Job ID와 집계는
+`docs/infra/evidence/pr-review-fault-injection.json`에 기록한다.
+
+이 검증이 보장하는 것은 **저장 결과의 exactly-once effect**다. provider 응답 후 Worker가
+중단되면 해당 응답은 저장되지 않았으므로 재수신 때 provider가 다시 호출될 수 있다. 따라서
+외부 AI 호출 자체는 at-least-once이며, 이 시나리오에서도 해당 경계의 provider 호출은 Job당
+2회였다. 또한 이 30건은 실제 AWS task 중단이나 실제 OpenAI 호출 결과가 아니다. AWS dev
+대표 중단 검증은 별도 E2E 기록으로 구분한다.
+
 ## Dev E2E 기록
 
 ### 2026-07-14 대형 PR 분석 관측 공백 발견
